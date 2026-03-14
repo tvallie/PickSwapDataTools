@@ -152,6 +152,8 @@ def deploy_to_web(payload: dict) -> None:
 
 def upload_to_server(local_path: str) -> None:
     """SCP the file to Bluehost using the ed25519 key exclusively."""
+    if not local_path.endswith(".json"):
+        raise ValueError(f"Refusing to upload non-JSON file: {local_path}")
     print(f"\nUploading to {REMOTE_OUTPUT} ...")
     # SSH_AUTH_SOCK="" disables the SSH agent so only the specified key is tried,
     # preventing "too many authentication failures" on servers with low MaxAuthTries.
