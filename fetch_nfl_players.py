@@ -21,15 +21,17 @@ Also deploys to PickSwapWeb/json/nfl_players.json, archiving the previous
 version to PickSwapWeb/json/prev_versions/nfl_players_YYYY-MM-DD.json.
 
 Usage:
-    python3 fetch_nfl_players.py
-    python3 fetch_nfl_players.py --output custom_output.json
-    python3 fetch_nfl_players.py --no-deploy
+    python3 fetch_nfl_players.py                  # full run: fetch, deploy local, upload to server
+    python3 fetch_nfl_players.py --no-upload      # skip Bluehost SCP upload
+    python3 fetch_nfl_players.py --no-deploy      # skip PickSwapWeb local deploy
+    python3 fetch_nfl_players.py --output x.json  # custom local output path
 """
 
 import json
 import os
 import shutil
 import ssl
+import subprocess
 import argparse
 from datetime import datetime, timezone
 from urllib.request import urlopen
@@ -46,6 +48,12 @@ DEFAULT_OUTPUT = "nfl_players.json"
 WEB_JSON_DIR = os.path.expanduser("~/CodingProjects/PickSwapWeb/json")
 WEB_OUTPUT = os.path.join(WEB_JSON_DIR, "nfl_players.json")
 WEB_PREV_DIR = os.path.join(WEB_JSON_DIR, "prev_versions")
+
+# Bluehost SSH config
+SSH_HOST = "67.20.76.241"
+SSH_USER = "vallieor"
+REMOTE_JSON_DIR = "public_html/json"
+REMOTE_OUTPUT = f"{SSH_USER}@{SSH_HOST}:{REMOTE_JSON_DIR}/nfl_players.json"
 
 
 def fetch_players() -> dict:
@@ -131,12 +139,27 @@ def deploy_to_web(payload: dict) -> None:
     write_output(payload, WEB_OUTPUT)
 
 
+def upload_to_server(local_path: str) -> None:
+    """SCP the file to Bluehost. Will prompt for password unless SSH keys are configured."""
+    print(f"\nUploading to {REMOTE_OUTPUT} ...")
+    result = subprocess.run(
+        ["scp", local_path, REMOTE_OUTPUT],
+        check=False,
+    )
+    if result.returncode == 0:
+        print(f"  Upload complete.")
+    else:
+        print(f"  Upload failed (exit code {result.returncode}). Check SSH credentials.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fetch active NFL players from Sleeper API.")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help=f"Local output JSON path (default: {DEFAULT_OUTPUT})")
     parser.add_argument("--no-deploy", action="store_true",
                         help="Skip deploying to PickSwapWeb/json/")
+    parser.add_argument("--no-upload", action="store_true",
+                        help="Skip SCP upload to Bluehost")
     args = parser.parse_args()
 
     raw = fetch_players()
@@ -153,6 +176,10 @@ def main():
     if not args.no_deploy:
         print(f"\nDeploying to PickSwapWeb ...")
         deploy_to_web(payload)
+
+    # Upload to Bluehost via SCP
+    if not args.no_upload:
+        upload_to_server(WEB_OUTPUT)
 
     print("\nDone.")
 
