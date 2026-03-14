@@ -52,7 +52,7 @@ WEB_PREV_DIR = os.path.join(WEB_JSON_DIR, "prev_versions")
 # Bluehost SSH config
 SSH_HOST = "67.20.76.241"
 SSH_USER = "vallieor"
-REMOTE_JSON_DIR = "public_html/json"
+REMOTE_JSON_DIR = "public_html/website_3650ab54/json"
 REMOTE_OUTPUT = f"{SSH_USER}@{SSH_HOST}:{REMOTE_JSON_DIR}/nfl_players.json"
 
 
