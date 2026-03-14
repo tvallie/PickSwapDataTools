@@ -17,12 +17,18 @@ Output format:
 Only includes players who are active AND currently on a roster (team is set).
 Players are sorted by team, then by name within each team.
 
+Also deploys to PickSwapWeb/json/nfl_players.json, archiving the previous
+version to PickSwapWeb/json/prev_versions/nfl_players_YYYY-MM-DD.json.
+
 Usage:
     python3 fetch_nfl_players.py
     python3 fetch_nfl_players.py --output custom_output.json
+    python3 fetch_nfl_players.py --no-deploy
 """
 
 import json
+import os
+import shutil
 import ssl
 import argparse
 from datetime import datetime, timezone
@@ -37,17 +43,9 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 
 SLEEPER_URL = "https://api.sleeper.app/v1/players/nfl"
 DEFAULT_OUTPUT = "nfl_players.json"
-
-# Positions to include — skill positions relevant to NFL trades
-INCLUDED_POSITIONS = {
-    "QB", "RB", "WR", "TE",
-    "K", "P",
-    "OT", "OG", "OL", "C",
-    "DE", "DT", "NT", "DL",
-    "LB", "ILB", "OLB",
-    "CB", "S", "FS", "SS", "DB",
-    "Edge", "EDGE",
-}
+WEB_JSON_DIR = os.path.expanduser("~/CodingProjects/PickSwapWeb/json")
+WEB_OUTPUT = os.path.join(WEB_JSON_DIR, "nfl_players.json")
+WEB_PREV_DIR = os.path.join(WEB_JSON_DIR, "prev_versions")
 
 
 def fetch_players() -> dict:
@@ -74,7 +72,6 @@ def filter_players(raw: dict) -> list[dict]:
         # Must have a name
         name = p.get("full_name") or ""
         if not name.strip():
-            # Fall back to first + last
             first = p.get("first_name") or ""
             last = p.get("last_name") or ""
             name = f"{first} {last}".strip()
@@ -96,28 +93,68 @@ def filter_players(raw: dict) -> list[dict]:
     return players
 
 
-def write_output(players: list[dict], output_path: str) -> None:
+def build_payload(players: list[dict]) -> tuple[dict, str]:
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "generated_at": generated_at,
         "players": players,
     }
+    return payload, generated_at
+
+
+def write_output(payload: dict, output_path: str) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
-    print(f"  Wrote {len(players):,} active rostered players → {output_path}")
-    print(f"  generated_at: {generated_at}")
+    count = len(payload["players"])
+    print(f"  Wrote {count:,} active rostered players → {output_path}")
+
+
+def deploy_to_web(payload: dict) -> None:
+    """Archive the existing nfl_players.json (if any), then write the new one."""
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Archive existing file if present
+    if os.path.exists(WEB_OUTPUT):
+        os.makedirs(WEB_PREV_DIR, exist_ok=True)
+        archive_name = f"nfl_players_{today}.json"
+        archive_path = os.path.join(WEB_PREV_DIR, archive_name)
+        # Avoid clobbering an existing archive from the same day
+        if os.path.exists(archive_path):
+            i = 1
+            while os.path.exists(archive_path):
+                archive_name = f"nfl_players_{today}_{i}.json"
+                archive_path = os.path.join(WEB_PREV_DIR, archive_name)
+                i += 1
+        shutil.move(WEB_OUTPUT, archive_path)
+        print(f"  Archived previous file → prev_versions/{archive_name}")
+
+    write_output(payload, WEB_OUTPUT)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Fetch active NFL players from Sleeper API.")
-    parser.add_argument("--output", default=DEFAULT_OUTPUT, help=f"Output JSON path (default: {DEFAULT_OUTPUT})")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT,
+                        help=f"Local output JSON path (default: {DEFAULT_OUTPUT})")
+    parser.add_argument("--no-deploy", action="store_true",
+                        help="Skip deploying to PickSwapWeb/json/")
     args = parser.parse_args()
 
     raw = fetch_players()
     players = filter_players(raw)
     print(f"  Filtered to {len(players):,} active rostered players.")
-    write_output(players, args.output)
-    print("Done.")
+
+    payload, generated_at = build_payload(players)
+    print(f"  generated_at: {generated_at}")
+
+    # Write local output
+    write_output(payload, args.output)
+
+    # Deploy to PickSwapWeb
+    if not args.no_deploy:
+        print(f"\nDeploying to PickSwapWeb ...")
+        deploy_to_web(payload)
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":
