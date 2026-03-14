@@ -171,7 +171,9 @@ def upload_to_server(local_path: str) -> None:
     if result.returncode == 0:
         print(f"  Upload complete.")
     else:
-        print(f"  Upload failed (exit code {result.returncode}). Check SSH credentials.")
+        msg = f"Upload failed (exit code {result.returncode}). Check SSH credentials."
+        print(f"  {msg}")
+        logger.error(msg)
 
 
 def main():
