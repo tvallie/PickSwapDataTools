@@ -209,4 +209,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        logger.error("Unhandled exception: %s", e, exc_info=True)
+        raise
