@@ -140,11 +140,22 @@ def deploy_to_web(payload: dict) -> None:
 
 
 def upload_to_server(local_path: str) -> None:
-    """SCP the file to Bluehost. Will prompt for password unless SSH keys are configured."""
+    """SCP the file to Bluehost using the ed25519 key exclusively."""
     print(f"\nUploading to {REMOTE_OUTPUT} ...")
+    # SSH_AUTH_SOCK="" disables the SSH agent so only the specified key is tried,
+    # preventing "too many authentication failures" on servers with low MaxAuthTries.
+    env = os.environ.copy()
+    env["SSH_AUTH_SOCK"] = ""
     result = subprocess.run(
-        ["scp", local_path, REMOTE_OUTPUT],
+        [
+            "scp",
+            "-i", os.path.expanduser("~/.ssh/id_ed25519"),
+            "-o", "IdentitiesOnly=yes",
+            local_path,
+            REMOTE_OUTPUT,
+        ],
         check=False,
+        env=env,
     )
     if result.returncode == 0:
         print(f"  Upload complete.")
