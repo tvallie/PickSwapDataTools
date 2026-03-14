@@ -72,6 +72,7 @@ def fetch_players() -> dict:
         with urlopen(SLEEPER_URL, timeout=30, context=_ssl_context) as response:
             raw = json.loads(response.read().decode("utf-8"))
     except URLError as e:
+        logger.error("Network error: %s", e)
         raise SystemExit(f"Network error: {e}")
     print(f"  Received {len(raw):,} total player records.")
     return raw
