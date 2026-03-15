@@ -58,7 +58,8 @@ REMOTE_JSON_DIR = "public_html/website_3650ab54/json"
 REMOTE_OUTPUT = f"{SSH_USER}@{SSH_HOST}:{REMOTE_JSON_DIR}/nfl_players.json"
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fetch_nfl_players.log")
+_LOG_PATH = os.path.expanduser("~/Desktop/pickswap logs/fetch_nfl_players.log")
+os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
 _handler = RotatingFileHandler(_LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=5)
 _handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)s  %(message)s"))
 logger = logging.getLogger("fetch_nfl_players")
