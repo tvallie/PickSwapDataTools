@@ -46,7 +46,7 @@ _ssl_context.check_hostname = False
 _ssl_context.verify_mode = ssl.CERT_NONE
 
 SLEEPER_URL = "https://api.sleeper.app/v1/players/nfl"
-DEFAULT_OUTPUT = "nfl_players.json"
+DEFAULT_OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nfl_players.json")
 WEB_JSON_DIR = os.path.expanduser("~/CodingProjects/PickSwapWeb/json")
 WEB_OUTPUT = os.path.join(WEB_JSON_DIR, "nfl_players.json")
 WEB_PREV_DIR = os.path.join(WEB_JSON_DIR, "prev_versions")
