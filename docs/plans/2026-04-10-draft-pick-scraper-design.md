@@ -46,7 +46,11 @@ For each mode (current / future):
 ## Scraping Sources
 
 ### Current Year Draft Order
-- `tankathon.com` — well-maintained, shows pick order + trades
+- `espn.com/nfl/draft/rounds/_/season/2026` — broad coverage, well-maintained
+- `nfldraftbuzz.com/DraftOrder/2026` — dedicated draft order tracking
+- `tankathon.com/nfl/full_draft` — full draft with trade info
+- `prosportstransactions.com/football/DraftTrades/Years/2026.htm` — trade transaction records
+- `si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds` — full 7-round list
 - `nflmockdraftdatabase.com` — detailed comp pick tracking
 - `pro-football-reference.com` — authoritative historical/current data
 
@@ -54,6 +58,7 @@ For each mode (current / future):
 - `overthecap.com/draft` — widely trusted for traded future picks
 - `tankathon.com` — covers future picks too
 - `nfltraderumors.co` — good for recent trade context
+- `football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team` — future picks by team
 
 ### News Cross-Reference (for AI context)
 - `nfl.com/news`

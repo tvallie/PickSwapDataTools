@@ -808,8 +808,19 @@ Before writing any parsing code, open each URL in a browser and inspect the HTML
 - Whether JavaScript rendering is required (if yes, Python scraping will likely fail → Claude fallback)
 
 Sites to inspect:
-- Current picks: `https://www.tankathon.com/picks/all_picks`, `https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order`, `https://www.pro-football-reference.com/years/2026/draft.htm`
-- Future picks: `https://overthecap.com/draft`, `https://www.tankathon.com/picks/future_picks`, `https://www.nfltraderumors.co/future-draft-picks`
+- Current picks:
+  - `https://www.espn.com/nfl/draft/rounds/_/season/2026`
+  - `https://www.nfldraftbuzz.com/DraftOrder/2026`
+  - `https://www.tankathon.com/nfl/full_draft`
+  - `https://prosportstransactions.com/football/DraftTrades/Years/2026.htm`
+  - `https://www.si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds`
+  - `https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order`
+  - `https://www.pro-football-reference.com/years/2026/draft.htm`
+- Future picks:
+  - `https://overthecap.com/draft`
+  - `https://www.tankathon.com/picks/future_picks`
+  - `https://www.nfltraderumors.co/future-draft-picks`
+  - `https://football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team`
 - News: `https://profootballtalk.nbcsports.com`, `https://www.nfl.com/news`, `https://www.espn.com/nfl/`
 
 Record findings before implementing Step 2.
@@ -886,14 +897,26 @@ Below the `Source` dataclass, add one stub per source. These will be replaced in
 ```python
 # ── Current pick parsers (stubs — replace with real selectors after site inspection) ──
 
+def _parse_espn_current(html: str) -> list[dict]:
+    raise NotImplementedError("ESPN current parser not yet implemented")
+
+def _parse_nfldraftbuzz_current(html: str) -> list[dict]:
+    raise NotImplementedError("NFLDraftBuzz current parser not yet implemented")
+
 def _parse_tankathon_current(html: str) -> list[dict]:
     raise NotImplementedError("Tankathon current parser not yet implemented")
 
-def _parse_pfr_current(html: str) -> list[dict]:
-    raise NotImplementedError("PFR current parser not yet implemented")
+def _parse_prosportstrans_current(html: str) -> list[dict]:
+    raise NotImplementedError("ProSportsTransactions current parser not yet implemented")
+
+def _parse_si_current(html: str) -> list[dict]:
+    raise NotImplementedError("SI current parser not yet implemented")
 
 def _parse_nflmockdb_current(html: str) -> list[dict]:
-    raise NotImplementedError("NFLMockDB parser not yet implemented")
+    raise NotImplementedError("NFLMockDB current parser not yet implemented")
+
+def _parse_pfr_current(html: str) -> list[dict]:
+    raise NotImplementedError("PFR current parser not yet implemented")
 
 
 # ── Future pick parsers (stubs) ──
@@ -906,6 +929,9 @@ def _parse_tankathon_future(html: str) -> list[dict]:
 
 def _parse_nfltraderumors_future(html: str) -> list[dict]:
     raise NotImplementedError("NFLTradeRumors future parser not yet implemented")
+
+def _parse_realgm_future(html: str) -> list[dict]:
+    raise NotImplementedError("RealGM future parser not yet implemented")
 
 
 # ── News fetch ──
@@ -930,15 +956,20 @@ def _fetch_news_snippets(urls: list[str], max_per_site: int = 5) -> list[str]:
 # ── Source registry ──
 
 CURRENT_SOURCES = [
-    Source("tankathon",         "https://www.tankathon.com/picks/all_picks",                         "current", _parse_tankathon_current, priority=0),
-    Source("nflmockdraftdb",    "https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order", "current", _parse_nflmockdb_current,  priority=1),
-    Source("pro-football-ref",  "https://www.pro-football-reference.com/years/2026/draft.htm",        "current", _parse_pfr_current,         priority=2),
+    Source("espn",              "https://www.espn.com/nfl/draft/rounds/_/season/2026",                                                    "current", _parse_espn_current,          priority=0),
+    Source("nfldraftbuzz",      "https://www.nfldraftbuzz.com/DraftOrder/2026",                                                           "current", _parse_nfldraftbuzz_current,   priority=1),
+    Source("tankathon",         "https://www.tankathon.com/nfl/full_draft",                                                               "current", _parse_tankathon_current,      priority=2),
+    Source("prosportstrans",    "https://prosportstransactions.com/football/DraftTrades/Years/2026.htm",                                   "current", _parse_prosportstrans_current, priority=3),
+    Source("si",                "https://www.si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds",                "current", _parse_si_current,             priority=4),
+    Source("nflmockdraftdb",    "https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order",                                  "current", _parse_nflmockdb_current,      priority=5),
+    Source("pro-football-ref",  "https://www.pro-football-reference.com/years/2026/draft.htm",                                            "current", _parse_pfr_current,            priority=6),
 ]
 
 FUTURE_SOURCES = [
-    Source("overthecap",        "https://overthecap.com/draft",                     "future", _parse_overthecap_future,    priority=0),
-    Source("tankathon-future",  "https://www.tankathon.com/picks/future_picks",      "future", _parse_tankathon_future,     priority=1),
-    Source("nfltraderumors",    "https://www.nfltraderumors.co/future-draft-picks",  "future", _parse_nfltraderumors_future, priority=2),
+    Source("overthecap",        "https://overthecap.com/draft",                                        "future", _parse_overthecap_future,    priority=0),
+    Source("tankathon-future",  "https://www.tankathon.com/picks/future_picks",                        "future", _parse_tankathon_future,     priority=1),
+    Source("nfltraderumors",    "https://www.nfltraderumors.co/future-draft-picks",                    "future", _parse_nfltraderumors_future, priority=2),
+    Source("realgm",            "https://football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team", "future", _parse_realgm_future,   priority=3),
 ]
 
 NEWS_URLS = [
@@ -953,7 +984,7 @@ NEWS_URLS = [
 ```bash
 python3 -c "from fetch_draft_picks.scraper import CURRENT_SOURCES; print(len(CURRENT_SOURCES), 'current sources registered')"
 ```
-Expected: `3 current sources registered`
+Expected: `7 current sources registered`
 
 **Step 5: Commit**
 
@@ -1042,9 +1073,9 @@ Implement all six parse functions (3 current, 3 future) following the same patte
 ```bash
 python3 -c "
 import requests
-from fetch_draft_picks.scraper import HEADERS, _parse_tankathon_current
-html = requests.get('https://www.tankathon.com/picks/all_picks', headers=HEADERS).text
-picks = _parse_tankathon_current(html)
+from fetch_draft_picks.scraper import HEADERS, _parse_espn_current
+html = requests.get('https://www.espn.com/nfl/draft/rounds/_/season/2026', headers=HEADERS).text
+picks = _parse_espn_current(html)
 print(f'{len(picks)} picks parsed')
 print(picks[:3])
 "
