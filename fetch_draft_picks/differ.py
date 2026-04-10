@@ -72,3 +72,58 @@ def compare_current_to_existing(
                              "original_team": pick.get("original_team", pick["team"])},
             })
     return changes
+
+
+def _future_key(pick: dict) -> tuple:
+    return (pick["year"], pick["round"], pick["original_abbr"])
+
+
+def diff_future_picks(sources: dict[str, list[dict]]) -> list[dict]:
+    """Compare future traded picks from multiple sources."""
+    if len(sources) < 2:
+        return []
+
+    indexed = {
+        name: {_future_key(p): p["current_abbr"] for p in picks}
+        for name, picks in sources.items()
+    }
+    all_keys = {k for idx in indexed.values() for k in idx}
+
+    conflicts = []
+    for key in sorted(all_keys):
+        values = {name: idx[key] for name, idx in indexed.items() if key in idx}
+        if len(set(values.values())) > 1:
+            year, round_, orig = key
+            conflicts.append({
+                "year": year, "round": round_, "original_abbr": orig,
+                "values": values,
+            })
+    return conflicts
+
+
+def compare_future_to_existing(
+    scraped: list[dict], existing: list[dict]
+) -> list[dict]:
+    """Diff scraped future picks against existing JSON. Returns proposed changes."""
+    existing_idx = {_future_key(p): p for p in existing}
+    scraped_idx  = {_future_key(p): p for p in scraped}
+
+    changes = []
+    # Detect updates and additions
+    for key, pick in scraped_idx.items():
+        ex = existing_idx.get(key)
+        if ex is None:
+            changes.append({"action": "add", **pick})
+        elif pick["current_abbr"] != ex["current_abbr"]:
+            year, round_, orig = key
+            changes.append({
+                "action": "update",
+                "year": year, "round": round_, "original_abbr": orig,
+                "current_abbr": {"current": ex["current_abbr"],
+                                 "proposed": pick["current_abbr"]},
+            })
+    # Detect removals
+    for key, ex in existing_idx.items():
+        if key not in scraped_idx:
+            changes.append({"action": "remove", **ex})
+    return changes
