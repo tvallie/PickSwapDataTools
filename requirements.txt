@@ -2,3 +2,5 @@ requests>=2.31
 beautifulsoup4>=4.12
 anthropic>=0.25
 pytest>=8.0
+PyQt6>=6.6
+pytest-qt>=4.4
