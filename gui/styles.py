@@ -41,6 +41,7 @@ QPushButton#run_btn {{
 }}
 QPushButton#run_btn:hover {{
     background-color: {FG};
+    color: {BG};
 }}
 QPushButton#quit_btn {{
     background-color: transparent;
@@ -93,7 +94,6 @@ QHeaderView::section {{
     padding: 4px 8px;
     font-weight: bold;
     font-size: 11px;
-    text-transform: uppercase;
 }}
 QTextEdit {{
     background-color: {BG_CARD};
@@ -108,7 +108,6 @@ QFrame#change_card {{
     background-color: {BG_CARD};
     border: 1px solid {BORDER};
     border-radius: 8px;
-    padding: 12px;
 }}
 QLabel#ai_label {{
     color: {AMBER};
