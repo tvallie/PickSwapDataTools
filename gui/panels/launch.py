@@ -41,7 +41,7 @@ class LaunchPanel(QWidget):
         root.addSpacerItem(QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
         self._dry_run_cb = QCheckBox("Dry Run (preview only, no files written)")
-        self._dry_run_cb.stateChanged.connect(self._update_button_label)
+        self._dry_run_cb.checkStateChanged.connect(self._update_button_label)
         root.addWidget(self._dry_run_cb)
 
         root.addSpacerItem(QSpacerItem(0, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
@@ -62,5 +62,5 @@ class LaunchPanel(QWidget):
 
     def _on_run(self):
         mode_map = {0: "current", 1: "future", 2: "both"}
-        mode = mode_map[self._mode_group.checkedId()]
+        mode = mode_map.get(self._mode_group.checkedId(), "current")
         self.run_requested.emit(mode, self._dry_run_cb.isChecked())
