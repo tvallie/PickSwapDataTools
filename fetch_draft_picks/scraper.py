@@ -290,6 +290,11 @@ def _fetch_news_snippets(urls: list[str], max_per_site: int = 5) -> list[str]:
     return snippets
 
 
+def fetch_news_snippets(urls: list[str], max_per_site: int = 5) -> list[str]:
+    """Public wrapper — see _fetch_news_snippets."""
+    return _fetch_news_snippets(urls, max_per_site)
+
+
 # ── Claude HTML fallback ──────────────────────────────────────────────────────
 
 _FALLBACK_PROMPT_CURRENT = """\

@@ -1,6 +1,7 @@
 """worker.py — QThread worker: scrape, diff, analyze; emits signals to UI."""
 import json
 import threading
+from collections import Counter
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -8,7 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from fetch_draft_picks.scraper import (
     CURRENT_SOURCES, FUTURE_SOURCES, NEWS_URLS,
     scrape_source, scrape_with_claude_fallback,
-    _fetch_news_snippets,
+    fetch_news_snippets,
 )
 from fetch_draft_picks.differ import (
     diff_current_picks, compare_current_to_existing,
@@ -20,6 +21,8 @@ REPO_ROOT    = Path(__file__).parent.parent
 CURRENT_JSON = REPO_ROOT / "json" / "draft_order_current.json"
 FUTURE_JSON  = REPO_ROOT / "json" / "future_pick_trades.json"
 
+_VALID_MODES = {"current", "future", "both"}
+
 
 class ScraperWorker(QThread):
     source_updated  = pyqtSignal(str, str, float, str)  # name, method, elapsed, status
@@ -28,6 +31,8 @@ class ScraperWorker(QThread):
     error           = pyqtSignal(str)
 
     def __init__(self, mode: str, dry_run: bool = False, parent=None):
+        if mode not in _VALID_MODES:
+            raise ValueError(f"mode must be one of {_VALID_MODES}, got {mode!r}")
         super().__init__(parent)
         self.mode    = mode
         self.dry_run = dry_run
@@ -39,13 +44,14 @@ class ScraperWorker(QThread):
     def run(self):
         try:
             if self.mode in ("current", "both"):
-                self._run_mode("current")
+                if not self._run_mode("current"):
+                    return
             if not self._cancel.is_set() and self.mode in ("future", "both"):
                 self._run_mode("future")
         except Exception as e:
             self.error.emit(str(e))
 
-    def _run_mode(self, mode: str):
+    def _run_mode(self, mode: str) -> bool:
         sources   = CURRENT_SOURCES if mode == "current" else FUTURE_SOURCES
         json_path = CURRENT_JSON    if mode == "current" else FUTURE_JSON
 
@@ -54,7 +60,7 @@ class ScraperWorker(QThread):
         results = []
         for source in sorted(sources, key=lambda s: s.priority):
             if self._cancel.is_set():
-                return
+                return False
             result = scrape_source(source)
             if result["picks"] is None:
                 self.log_message.emit("WARN", f"{source.name}: python failed → Claude fallback")
@@ -75,10 +81,17 @@ class ScraperWorker(QThread):
             self.error.emit(
                 f"Only {len(successful)} source(s) returned data. Need ≥2 to diff."
             )
-            return
+            return False
 
-        with open(json_path) as f:
-            existing = json.load(f)
+        try:
+            with open(json_path) as f:
+                existing = json.load(f)
+        except FileNotFoundError:
+            self.error.emit(f"JSON file not found: {json_path}. Has the scraper been run before?")
+            return False
+        except json.JSONDecodeError as e:
+            self.error.emit(f"Malformed JSON in {json_path}: {e}")
+            return False
 
         if mode == "current":
             cross_conflicts = diff_current_picks(successful)
@@ -95,13 +108,13 @@ class ScraperWorker(QThread):
         ai = {}
         if cross_conflicts and not self.dry_run:
             self.log_message.emit("INFO", "Fetching news + running AI analysis...")
-            news = _fetch_news_snippets(NEWS_URLS)
+            news = fetch_news_snippets(NEWS_URLS)
             ai   = analyze_conflicts(cross_conflicts, news, mode=mode)
 
         self.scrape_complete.emit(changes, ai)
+        return True
 
     def _majority_vote_current(self, sources: dict) -> list:
-        from collections import Counter
         all_overalls = sorted({p["overall"] for picks in sources.values() for p in picks})
         result = []
         for overall in all_overalls:
@@ -115,8 +128,7 @@ class ScraperWorker(QThread):
         return result
 
     def _majority_vote_future(self, sources: dict) -> list:
-        from collections import Counter
-        from fetch_draft_picks.differ import _future_key
+        from fetch_draft_picks.differ import _future_key  # private helper, same package
         all_keys = {_future_key(p) for picks in sources.values() for p in picks}
         result = []
         for key in sorted(all_keys):

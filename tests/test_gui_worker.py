@@ -1,16 +1,8 @@
 import pytest
-import sys
 from unittest.mock import patch, MagicMock
-from PyQt6.QtCore import QCoreApplication
 
 
-@pytest.fixture(scope="session")
-def qapp_instance():
-    app = QCoreApplication.instance() or QCoreApplication(sys.argv)
-    return app
-
-
-def test_worker_emits_scrape_complete(qapp_instance, qtbot):
+def test_worker_emits_scrape_complete(qtbot):
     from gui.worker import ScraperWorker
 
     fake_picks = [
@@ -45,7 +37,7 @@ def test_worker_emits_scrape_complete(qapp_instance, qtbot):
     assert isinstance(ai, dict)
 
 
-def test_worker_emits_source_updated(qapp_instance, qtbot):
+def test_worker_emits_source_updated(qtbot):
     from gui.worker import ScraperWorker
 
     fake_picks = [{"overall": 1, "round": 1, "pick_in_round": 1,
