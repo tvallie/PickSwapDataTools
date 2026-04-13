@@ -29,10 +29,10 @@ class ScrapingPanel(QWidget):
         self._status_label = QLabel("Scraping sources…")
         header.addWidget(self._status_label)
         header.addStretch()
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedWidth(80)
-        cancel_btn.clicked.connect(self.cancel_requested)
-        header.addWidget(cancel_btn)
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setFixedWidth(80)
+        self._cancel_btn.clicked.connect(self.cancel_requested)
+        header.addWidget(self._cancel_btn)
         root.addLayout(header)
 
         self._table = QTableWidget(0, 4)
@@ -47,11 +47,11 @@ class ScrapingPanel(QWidget):
         self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         root.addWidget(self._table)
 
-        log_toggle = QPushButton("▶ Log")
-        log_toggle.setCheckable(True)
-        log_toggle.setFixedWidth(80)
-        log_toggle.toggled.connect(self._toggle_log)
-        root.addWidget(log_toggle)
+        self._log_toggle = QPushButton("▶ Log")
+        self._log_toggle.setCheckable(True)
+        self._log_toggle.setFixedWidth(80)
+        self._log_toggle.toggled.connect(self._toggle_log)
+        root.addWidget(self._log_toggle)
 
         self._log = QTextEdit()
         self._log.setReadOnly(True)
@@ -72,6 +72,8 @@ class ScrapingPanel(QWidget):
             self._row_map[name] = i
         self._table.resizeRowsToContents()
         self._log.clear()
+        self._log_toggle.setChecked(False)
+        self._log.setVisible(False)
         self._status_label.setText("Scraping sources…")
 
     def _set_row(self, row: int, name: str, method: str, elapsed: str, status: str):
