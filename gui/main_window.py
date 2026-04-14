@@ -83,30 +83,32 @@ class MainWindow(QMainWindow):
         if self._dry_run:
             lines = [
                 f"{len(changes)} proposed ownership change(s) found:\n",
-                f"{'Pick':<7} {'Rnd':<4} {'In your file':<16} {'Scraped':<16} {'Sources'}",
-                "─" * 72,
+                f"{'Pick':<7} {'Rnd':<4} {'Your JSON':<10} {'Proposed':<22} {'Source verdicts'}",
+                "─" * 78,
             ]
             for c in changes:
                 if "overall" in c:
                     rnd       = c.get("round", "?")
-                    curr      = c.get("current", {})
                     prop      = c["proposed"]
-                    json_abbr = c.get("_json_abbr", curr.get("abbr", "—") if curr else "NEW")
-                    sources   = ", ".join(c.get("_sources_agree", [])) or "—"
-                    matches   = "✓ matches" if c.get("_json_matches") else ""
+                    json_abbr = c.get("_json_abbr", "—")
+                    verdicts  = c.get("_source_verdicts", {})
+                    src_str   = "  ".join(
+                        f"{src}: {abbr} {'✓' if abbr == prop['abbr'] else '✗'}"
+                        for src, abbr in verdicts.items()
+                    )
                     lines.append(
                         f"#{c['overall']:<6} R{rnd:<3} "
-                        f"{json_abbr:<16} "
-                        f"{prop['abbr']} ({prop['team'][:10]})  "
-                        f"{sources} {matches}"
+                        f"{json_abbr:<10} "
+                        f"{prop['abbr']} ({prop['team'][:15]:<15})  "
+                        f"{src_str}"
                     )
                 else:
-                    action = c["action"].upper()
-                    year   = c.get("year", "?")
-                    rnd    = c.get("round", "?")
-                    orig   = c.get("original_abbr", "?")
-                    curr   = c.get("current_abbr", "?")
-                    lines.append(f"{action}  {year} R{rnd}  orig={orig}  current={curr}")
+                    action    = c["action"].upper()
+                    year      = c.get("year", "?")
+                    rnd       = c.get("round", "?")
+                    orig      = c.get("original_abbr", "?")
+                    curr_abbr = c.get("current_abbr", "?")
+                    lines.append(f"{action}  {year} R{rnd}  orig={orig}  current={curr_abbr}")
             QMessageBox.information(self, "Preview — No files written", "\n".join(lines))
             self._go_to_launch()
             return

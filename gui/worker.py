@@ -96,18 +96,17 @@ class ScraperWorker(QThread):
             consensus       = self._majority_vote_current(successful) if len(successful) >= 2 \
                               else list(successful.values())[0]
             changes         = compare_current_to_existing(consensus, existing["picks"])
-            # Annotate each change with which sources agree on the proposed value
+            # Annotate each change with what every source says for that pick
             existing_idx = {p["overall"]: p for p in existing["picks"]}
             for c in changes:
-                overall = c["overall"]
+                overall       = c["overall"]
                 proposed_abbr = c["proposed"]["abbr"]
-                json_abbr = existing_idx.get(overall, {}).get("abbr", "—")
-                c["_sources_agree"] = [
-                    src for src, picks in successful.items()
-                    if any(p["overall"] == overall and p["abbr"] == proposed_abbr for p in picks)
-                ]
+                json_abbr     = existing_idx.get(overall, {}).get("abbr", "—")
                 c["_json_abbr"] = json_abbr
-                c["_json_matches"] = json_abbr == proposed_abbr
+                c["_source_verdicts"] = {
+                    src: next((p["abbr"] for p in picks if p["overall"] == overall), None)
+                    for src, picks in successful.items()
+                }
         else:
             cross_conflicts = diff_future_picks(successful) if len(successful) >= 2 else []
             consensus       = self._majority_vote_future(successful) if len(successful) >= 2 \
