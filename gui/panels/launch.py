@@ -41,6 +41,7 @@ class LaunchPanel(QWidget):
         root.addSpacerItem(QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
         self._dry_run_cb = QCheckBox("Dry Run (preview only, no files written)")
+        self._dry_run_cb.setChecked(True)
         self._dry_run_cb.checkStateChanged.connect(self._update_button_label)
         root.addWidget(self._dry_run_cb)
 
@@ -48,7 +49,7 @@ class LaunchPanel(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._run_btn = QPushButton("▶  Run")
+        self._run_btn = QPushButton("▶  Preview")
         self._run_btn.setObjectName("run_btn")
         self._run_btn.clicked.connect(self._on_run)
         btn_row.addWidget(self._run_btn)
