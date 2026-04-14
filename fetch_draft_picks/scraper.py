@@ -342,7 +342,7 @@ def scrape_with_claude_fallback(source: Source) -> dict:
         client = anthropic.Anthropic()
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text.strip()
