@@ -77,10 +77,8 @@ class ScraperWorker(QThread):
             results.append(result)
 
         successful = {r["source"]: r["picks"] for r in results if r["picks"]}
-        if len(successful) < 2:
-            self.error.emit(
-                f"Only {len(successful)} source(s) returned data. Need ≥2 to diff."
-            )
+        if len(successful) < 1:
+            self.error.emit("No sources returned data — check your internet connection.")
             return False
 
         try:
@@ -94,14 +92,20 @@ class ScraperWorker(QThread):
             return False
 
         if mode == "current":
-            cross_conflicts = diff_current_picks(successful)
-            consensus       = self._majority_vote_current(successful)
+            cross_conflicts = diff_current_picks(successful) if len(successful) >= 2 else []
+            consensus       = self._majority_vote_current(successful) if len(successful) >= 2 \
+                              else list(successful.values())[0]
             changes         = compare_current_to_existing(consensus, existing["picks"])
         else:
-            cross_conflicts = diff_future_picks(successful)
-            consensus       = self._majority_vote_future(successful)
+            cross_conflicts = diff_future_picks(successful) if len(successful) >= 2 else []
+            consensus       = self._majority_vote_future(successful) if len(successful) >= 2 \
+                              else list(successful.values())[0]
             changes         = compare_future_to_existing(consensus, existing["traded_picks"])
 
+        src_count = len(successful)
+        self.log_message.emit("INFO", f"Sources with data: {src_count}")
+        if src_count < 2:
+            self.log_message.emit("WARN", "Only 1 source — skipping cross-source diff, comparing directly to stored JSON")
         self.log_message.emit("INFO", f"Cross-source conflicts: {len(cross_conflicts)}")
         self.log_message.emit("INFO", f"Proposed changes: {len(changes)}")
 
