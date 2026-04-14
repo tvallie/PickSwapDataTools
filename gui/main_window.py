@@ -83,20 +83,22 @@ class MainWindow(QMainWindow):
         if self._dry_run:
             lines = [
                 f"{len(changes)} proposed ownership change(s) found:\n",
-                f"{'Pick':<8} {'Rnd':<5} {'Current Owner':<18} {'New Owner':<18}",
-                "─" * 52,
+                f"{'Pick':<7} {'Rnd':<4} {'In your file':<16} {'Scraped':<16} {'Sources'}",
+                "─" * 72,
             ]
             for c in changes:
                 if "overall" in c:
-                    rnd  = c.get("round", "?")
-                    curr = c.get("current", {})
-                    curr_abbr = curr.get("abbr", "—") if curr else "NEW"
-                    curr_team = curr.get("team", "(new slot)") if curr else "(new slot)"
-                    prop = c["proposed"]
+                    rnd       = c.get("round", "?")
+                    curr      = c.get("current", {})
+                    prop      = c["proposed"]
+                    json_abbr = c.get("_json_abbr", curr.get("abbr", "—") if curr else "NEW")
+                    sources   = ", ".join(c.get("_sources_agree", [])) or "—"
+                    matches   = "✓ matches" if c.get("_json_matches") else ""
                     lines.append(
-                        f"#{c['overall']:<7} R{rnd:<4} "
-                        f"{curr_abbr} ({curr_team[:12]:<12})  →  "
-                        f"{prop['abbr']} ({prop['team'][:12]})"
+                        f"#{c['overall']:<6} R{rnd:<3} "
+                        f"{json_abbr:<16} "
+                        f"{prop['abbr']} ({prop['team'][:10]})  "
+                        f"{sources} {matches}"
                     )
                 else:
                     action = c["action"].upper()
