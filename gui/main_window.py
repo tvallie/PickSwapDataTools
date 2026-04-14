@@ -18,10 +18,10 @@ from gui.worker          import ScraperWorker
 from gui.styles          import STYLESHEET, GREEN, RED
 from fetch_draft_picks.scraper import CURRENT_SOURCES, FUTURE_SOURCES
 
-REPO_ROOT    = Path(__file__).parent.parent
-CURRENT_JSON = REPO_ROOT / "json" / "draft_order_current.json"
-FUTURE_JSON  = REPO_ROOT / "json" / "future_pick_trades.json"
-ARCHIVE_DIR  = REPO_ROOT / "json" / "archive"
+JSON_DIR     = Path("/Users/todd/CodingProjects/PickSwapWeb/json")
+CURRENT_JSON = JSON_DIR / "draft_order_current.json"
+FUTURE_JSON  = JSON_DIR / "future_pick_trades.json"
+ARCHIVE_DIR  = JSON_DIR / "archive"
 
 LAUNCH, SCRAPING, REVIEW = 0, 1, 2
 

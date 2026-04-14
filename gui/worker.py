@@ -17,9 +17,9 @@ from fetch_draft_picks.differ import (
 )
 from fetch_draft_picks.analyzer import analyze_conflicts
 
-REPO_ROOT    = Path(__file__).parent.parent
-CURRENT_JSON = REPO_ROOT / "json" / "draft_order_current.json"
-FUTURE_JSON  = REPO_ROOT / "json" / "future_pick_trades.json"
+JSON_DIR     = Path("/Users/todd/CodingProjects/PickSwapWeb/json")
+CURRENT_JSON = JSON_DIR / "draft_order_current.json"
+FUTURE_JSON  = JSON_DIR / "future_pick_trades.json"
 
 _VALID_MODES = {"current", "future", "both"}
 
