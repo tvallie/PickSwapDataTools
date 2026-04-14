@@ -272,6 +272,65 @@ def _parse_realgm_future(html: str) -> list[dict]:
     raise NotImplementedError("RealGM future: use Claude fallback")
 
 
+# ── ESPN Core API parser ──────────────────────────────────────────────────────
+
+def _parse_espn_api_current(json_text: str) -> list[dict]:
+    """Parse ESPN Core API /draft/rounds response — returns all 257 picks with trade info."""
+    import re
+
+    data = json.loads(json_text)
+
+    # Build ESPN team-id → {abbr, name} lookup via site API
+    try:
+        teams_resp = requests.get(
+            "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams?limit=40",
+            headers=HEADERS,
+            timeout=20,
+        )
+        teams_resp.raise_for_status()
+        team_lookup: dict[str, dict] = {}
+        for entry in teams_resp.json()["sports"][0]["leagues"][0]["teams"]:
+            t = entry["team"]
+            team_lookup[t["id"]] = {"abbr": t["abbreviation"], "name": t["displayName"]}
+    except Exception as e:
+        raise ValueError(f"ESPN team lookup failed: {e}") from e
+
+    picks = []
+    for round_data in data.get("items", []):
+        round_num = round_data["number"]
+        for pick_data in round_data.get("picks", []):
+            team_ref = pick_data.get("team", {}).get("$ref", "")
+            m = re.search(r"/teams/(\d+)", team_ref)
+            if not m:
+                continue
+            team_info = team_lookup.get(m.group(1), {"abbr": "UNK", "name": "Unknown"})
+
+            traded     = pick_data.get("traded", False)
+            trade_note = pick_data.get("tradeNote", "")
+
+            # Extract original team abbreviation from trade note ("From ATL", "From MIN through JAX")
+            original_name = team_info["name"]
+            if traded and trade_note:
+                orig_m = re.match(r"From\s+([A-Z]{2,3})", trade_note)
+                if orig_m:
+                    orig_abbr = orig_m.group(1)
+                    original_name = _ABBR_TEAM.get(orig_abbr, team_info["name"])
+
+            picks.append({
+                "overall":       pick_data["overall"],
+                "round":         round_num,
+                "pick_in_round": pick_data["pick"],
+                "team":          team_info["name"],
+                "abbr":          team_info["abbr"],
+                "is_comp":       pick_data["pick"] > 32,
+                "original_team": original_name,
+            })
+
+    if not picks:
+        raise ValueError("No picks parsed from ESPN API response")
+    return sorted(picks, key=lambda p: p["overall"])
+
+
 # ── News fetch ────────────────────────────────────────────────────────────────
 
 def _fetch_news_snippets(urls: list[str], max_per_site: int = 5) -> list[str]:
@@ -377,13 +436,14 @@ def scrape_all_sources(sources: list[Source]) -> list[dict]:
 # ── Source registry ───────────────────────────────────────────────────────────
 
 CURRENT_SOURCES = [
-    Source("espn",           "https://www.espn.com/nfl/draft/rounds/_/season/2026",                                     "current", _parse_espn_current,          priority=0),
-    Source("nfldraftbuzz",   "https://www.nfldraftbuzz.com/DraftOrder/2026",                                             "current", _parse_nfldraftbuzz_current,   priority=1),
-    Source("tankathon",      "https://www.tankathon.com/nfl/full_draft",                                                 "current", _parse_tankathon_current,      priority=2),
-    Source("prosportstrans", "https://prosportstransactions.com/football/DraftTrades/Years/2026.htm",                    "current", _parse_prosportstrans_current, priority=3),
-    Source("si",             "https://www.si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds",  "current", _parse_si_current,             priority=4),
-    Source("nflmockdraftdb", "https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order",                   "current", _parse_nflmockdb_current,      priority=5),
-    Source("pro-football-ref", "https://www.pro-football-reference.com/years/2026/draft.htm",                           "current", _parse_pfr_current,            priority=6),
+    Source("espn-api",       "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2026/draft/rounds", "current", _parse_espn_api_current,      priority=0),
+    Source("tankathon",      "https://www.tankathon.com/nfl/full_draft",                                                  "current", _parse_tankathon_current,     priority=1),
+    Source("espn",           "https://www.espn.com/nfl/draft/rounds/_/season/2026",                                      "current", _parse_espn_current,          priority=2),
+    Source("nfldraftbuzz",   "https://www.nfldraftbuzz.com/DraftOrder/2026",                                              "current", _parse_nfldraftbuzz_current,  priority=3),
+    Source("prosportstrans", "https://prosportstransactions.com/football/DraftTrades/Years/2026.htm",                     "current", _parse_prosportstrans_current, priority=4),
+    Source("si",             "https://www.si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds",  "current", _parse_si_current,             priority=5),
+    Source("nflmockdraftdb", "https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order",                    "current", _parse_nflmockdb_current,     priority=6),
+    Source("pro-football-ref", "https://www.pro-football-reference.com/years/2026/draft.htm",                            "current", _parse_pfr_current,           priority=7),
 ]
 
 FUTURE_SOURCES = [
