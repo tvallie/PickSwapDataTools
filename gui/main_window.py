@@ -81,14 +81,31 @@ class MainWindow(QMainWindow):
             return
         self._scraping.set_status(f"Done — {len(changes)} change(s) to review.")
         if self._dry_run:
-            lines = []
+            lines = [
+                f"{len(changes)} proposed ownership change(s) found:\n",
+                f"{'Pick':<8} {'Rnd':<5} {'Current Owner':<18} {'New Owner':<18}",
+                "─" * 52,
+            ]
             for c in changes:
                 if "overall" in c:
-                    curr_abbr = c.get("current", {}).get("abbr", "NEW") if c.get("current") else "NEW"
-                    lines.append(f"Pick #{c['overall']}: {curr_abbr} → {c['proposed']['abbr']}")
+                    rnd  = c.get("round", "?")
+                    curr = c.get("current", {})
+                    curr_abbr = curr.get("abbr", "—") if curr else "NEW"
+                    curr_team = curr.get("team", "(new slot)") if curr else "(new slot)"
+                    prop = c["proposed"]
+                    lines.append(
+                        f"#{c['overall']:<7} R{rnd:<4} "
+                        f"{curr_abbr} ({curr_team[:12]:<12})  →  "
+                        f"{prop['abbr']} ({prop['team'][:12]})"
+                    )
                 else:
-                    lines.append(f"{c['action'].upper()} {c.get('year')} R{c.get('round')} {c.get('original_abbr')}")
-            QMessageBox.information(self, "Dry Run — Proposed Changes", "\n".join(lines) or "No changes.")
+                    action = c["action"].upper()
+                    year   = c.get("year", "?")
+                    rnd    = c.get("round", "?")
+                    orig   = c.get("original_abbr", "?")
+                    curr   = c.get("current_abbr", "?")
+                    lines.append(f"{action}  {year} R{rnd}  orig={orig}  current={curr}")
+            QMessageBox.information(self, "Preview — No files written", "\n".join(lines))
             self._go_to_launch()
             return
         self._review.load_changes(changes, ai, self._mode)
