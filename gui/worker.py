@@ -108,9 +108,21 @@ class ScraperWorker(QThread):
                     for src, picks in successful.items()
                 }
         else:
-            cross_conflicts = diff_future_picks(successful) if len(successful) >= 2 else []
-            consensus       = self._majority_vote_future(successful) if len(successful) >= 2 \
-                              else list(successful.values())[0]
+            import datetime
+            current_year = datetime.date.today().year
+            # Strip current-year picks — they belong to current mode, not future
+            filtered = {
+                src: [p for p in picks if p.get("year", 0) > current_year]
+                for src, picks in successful.items()
+            }
+            filtered = {src: picks for src, picks in filtered.items() if picks}
+            if not filtered:
+                self.log_message.emit("WARN", f"No future picks (year > {current_year}) found in scraped data.")
+                self.scrape_complete.emit([], {})
+                return True
+            cross_conflicts = diff_future_picks(filtered) if len(filtered) >= 2 else []
+            consensus       = self._majority_vote_future(filtered) if len(filtered) >= 2 \
+                              else list(filtered.values())[0]
             changes         = compare_future_to_existing(consensus, existing["traded_picks"])
 
         src_count = len(successful)
