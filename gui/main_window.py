@@ -3,13 +3,19 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PyQt6.QtWidgets import QMainWindow, QStackedWidget, QMessageBox
+from PyQt6.QtWidgets import (
+    QMainWindow, QStackedWidget, QMessageBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLabel, QTableWidget, QTableWidgetItem, QHeaderView,
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 
 from gui.panels.launch   import LaunchPanel
 from gui.panels.scraping import ScrapingPanel
 from gui.panels.review   import ReviewPanel
 from gui.worker          import ScraperWorker
-from gui.styles          import STYLESHEET
+from gui.styles          import STYLESHEET, GREEN, RED
 from fetch_draft_picks.scraper import CURRENT_SOURCES, FUTURE_SOURCES
 
 REPO_ROOT    = Path(__file__).parent.parent
@@ -81,40 +87,104 @@ class MainWindow(QMainWindow):
             return
         self._scraping.set_status(f"Done — {len(changes)} change(s) to review.")
         if self._dry_run:
-            lines = [
-                f"{len(changes)} proposed ownership change(s) found:\n",
-                f"{'Pick':<7} {'Rnd':<4} {'Your JSON':<10} {'Proposed':<22} {'Source verdicts'}",
-                "─" * 78,
-            ]
-            for c in changes:
-                if "overall" in c:
-                    rnd       = c.get("round", "?")
-                    prop      = c["proposed"]
-                    json_abbr = c.get("_json_abbr", "—")
-                    verdicts  = c.get("_source_verdicts", {})
-                    src_str   = "  ".join(
-                        f"{src}: {abbr} {'✓' if abbr == prop['abbr'] else '✗'}"
-                        for src, abbr in verdicts.items()
-                    )
-                    lines.append(
-                        f"#{c['overall']:<6} R{rnd:<3} "
-                        f"{json_abbr:<10} "
-                        f"{prop['abbr']} ({prop['team'][:15]:<15})  "
-                        f"{src_str}"
-                    )
-                else:
-                    action    = c["action"].upper()
-                    year      = c.get("year", "?")
-                    rnd       = c.get("round", "?")
-                    orig      = c.get("original_abbr", "?")
-                    curr_abbr = c.get("current_abbr", "?")
-                    lines.append(f"{action}  {year} R{rnd}  orig={orig}  current={curr_abbr}")
-            QMessageBox.information(self, "Preview — No files written", "\n".join(lines))
+            self._show_dry_run_dialog(changes)
             self._go_to_launch()
             return
         self._review.load_changes(changes, ai, self._mode)
         self._stack.setCurrentIndex(REVIEW)
         self.resize(540, 480)
+
+    def _show_dry_run_dialog(self, changes: list):
+        # Collect source names in stable order from first change that has verdicts
+        sources = []
+        for c in changes:
+            for s in c.get("_source_verdicts", {}):
+                if s not in sources:
+                    sources.append(s)
+
+        # Fixed columns + one column per source
+        fixed_headers = ["Pick", "Rnd", "Your JSON", "Proposed Team"]
+        all_headers   = fixed_headers + sources
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Preview — No files written")
+        dlg.setStyleSheet(self.styleSheet())
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        lbl = QLabel(f"{len(changes)} proposed ownership change(s)")
+        lbl.setObjectName("title_label")
+        layout.addWidget(lbl)
+
+        tbl = QTableWidget(len(changes), len(all_headers))
+        tbl.setHorizontalHeaderLabels(all_headers)
+        tbl.verticalHeader().setVisible(False)
+        tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        tbl.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        tbl.setShowGrid(True)
+
+        # Stretch the "Proposed Team" column; others fit content
+        hdr = tbl.horizontalHeader()
+        for col in range(len(all_headers)):
+            if col == 3:
+                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+            else:
+                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+
+        def cell(text, align=Qt.AlignmentFlag.AlignCenter, color=None):
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(align)
+            if color:
+                item.setForeground(QColor(color))
+            return item
+
+        for row, c in enumerate(changes):
+            if "overall" in c:
+                prop      = c["proposed"]
+                json_abbr = c.get("_json_abbr", "—")
+                verdicts  = c.get("_source_verdicts", {})
+
+                tbl.setItem(row, 0, cell(f"#{c['overall']}"))
+                tbl.setItem(row, 1, cell(f"R{c.get('round', '?')}"))
+                tbl.setItem(row, 2, cell(json_abbr))
+                tbl.setItem(row, 3, cell(
+                    f"{prop['abbr']}  —  {prop['team']}",
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                ))
+
+                for col_offset, src in enumerate(sources):
+                    abbr   = verdicts.get(src)
+                    agrees = abbr == prop["abbr"]
+                    icon   = "✓" if agrees else "✗"
+                    text   = f"{icon}  {abbr}" if abbr else "—"
+                    tbl.setItem(row, len(fixed_headers) + col_offset,
+                                cell(text, color=GREEN if agrees else RED))
+            else:
+                # Future pick row — span all columns
+                action = c["action"].upper()
+                text   = (f"{action}  {c.get('year')} R{c.get('round')}  "
+                          f"{c.get('original_abbr')} → {c.get('current_abbr')}")
+                tbl.setItem(row, 0, cell(text, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft))
+                tbl.setSpan(row, 0, 1, len(all_headers))
+
+        tbl.resizeRowsToContents()
+
+        # Size dialog to fit table comfortably
+        tbl.setMinimumHeight(min(400, 40 + len(changes) * 30))
+        layout.addWidget(tbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton("OK")
+        ok_btn.setFixedWidth(80)
+        ok_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        dlg.adjustSize()
+        dlg.exec()
 
     def _on_worker_error(self, message: str):
         QMessageBox.critical(self, "Error", message)
