@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
 
     def _on_scrape_complete(self, changes: list, ai: dict):
         if not changes:
-            QMessageBox.information(self, "No Changes", "All sources agree — no changes needed.")
+            QMessageBox.information(self, "No Changes", "Scraped data matches your JSON — no changes needed.")
             self._go_to_launch()
             return
         self._scraping.set_status(f"Done — {len(changes)} change(s) to review.")
