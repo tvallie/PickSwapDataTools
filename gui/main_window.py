@@ -15,7 +15,7 @@ from gui.panels.launch   import LaunchPanel
 from gui.panels.scraping import ScrapingPanel
 from gui.panels.review   import ReviewPanel
 from gui.worker          import ScraperWorker
-from gui.styles          import STYLESHEET, GREEN, RED
+from gui.styles          import STYLESHEET, GREEN, RED, AMBER
 from fetch_draft_picks.scraper import CURRENT_SOURCES, FUTURE_SOURCES
 
 JSON_DIR     = Path("/Users/todd/CodingProjects/PickSwapWeb/json")
@@ -95,16 +95,21 @@ class MainWindow(QMainWindow):
         self.resize(540, 480)
 
     def _show_dry_run_dialog(self, changes: list):
-        # Collect source names in stable order from first change that has verdicts
+        # Detect mode from change structure
+        is_future = changes and "action" in changes[0]
+
+        # Collect source names in stable order
         sources = []
         for c in changes:
             for s in c.get("_source_verdicts", {}):
                 if s not in sources:
                     sources.append(s)
 
-        # Fixed columns + one column per source
-        fixed_headers = ["Pick", "Rnd", "Your JSON", "Proposed Team"]
-        all_headers   = fixed_headers + sources
+        if is_future:
+            fixed_headers = ["Action", "Year", "Rnd", "Original Team", "Your JSON", "Proposed"]
+        else:
+            fixed_headers = ["Pick", "Rnd", "Your JSON", "Proposed Team"]
+        all_headers = fixed_headers + sources
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Preview — No files written")
@@ -114,7 +119,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
 
-        lbl = QLabel(f"{len(changes)} proposed ownership change(s)")
+        lbl = QLabel(f"{len(changes)} proposed {'future pick' if is_future else 'ownership'} change(s)")
         lbl.setObjectName("title_label")
         layout.addWidget(lbl)
 
@@ -125,54 +130,82 @@ class MainWindow(QMainWindow):
         tbl.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         tbl.setShowGrid(True)
 
-        # Stretch the "Proposed Team" column; others fit content
         hdr = tbl.horizontalHeader()
+        proposed_col = 5 if is_future else 3
         for col in range(len(all_headers)):
-            if col == 3:
+            if col == proposed_col:
                 hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
             else:
                 hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
 
+        left = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+
         def cell(text, align=Qt.AlignmentFlag.AlignCenter, color=None):
-            item = QTableWidgetItem(text)
+            item = QTableWidgetItem(str(text))
             item.setTextAlignment(align)
             if color:
                 item.setForeground(QColor(color))
             return item
 
         for row, c in enumerate(changes):
-            if "overall" in c:
-                prop      = c["proposed"]
-                json_abbr = c.get("_json_abbr", "—")
-                verdicts  = c.get("_source_verdicts", {})
+            verdicts     = c.get("_source_verdicts", {})
+            proposed_val = None
+
+            if is_future:
+                action = c["action"].upper()
+                year   = c.get("year", "?")
+                rnd    = c.get("round", "?")
+                orig   = c.get("original_abbr", "?")
+
+                if c["action"] == "add":
+                    json_val     = "not tracked"
+                    proposed_str = c.get("current_abbr", "?")
+                    proposed_val = c.get("_proposed_curr") or proposed_str
+                elif c["action"] == "update":
+                    ca           = c["current_abbr"]
+                    json_val     = ca.get("current", "?")
+                    proposed_str = ca.get("proposed", "?")
+                    proposed_val = proposed_str
+                else:
+                    json_val     = c.get("current_abbr", "?")
+                    proposed_str = "— remove —"
+                    proposed_val = None
+
+                action_color = {"ADD": GREEN, "UPDATE": AMBER, "REMOVE": RED}.get(action)
+                tbl.setItem(row, 0, cell(action, color=action_color))
+                tbl.setItem(row, 1, cell(str(year)))
+                tbl.setItem(row, 2, cell(f"R{rnd}"))
+                tbl.setItem(row, 3, cell(orig))
+                tbl.setItem(row, 4, cell(json_val))
+                tbl.setItem(row, 5, cell(proposed_str, align=left))
+
+                for col_offset, src in enumerate(sources):
+                    abbr   = verdicts.get(src)
+                    agrees = (abbr == proposed_val) if proposed_val else False
+                    icon   = "✓" if agrees else ("✗" if abbr else "—")
+                    text   = f"{icon}  {abbr}" if abbr else "—"
+                    tbl.setItem(row, len(fixed_headers) + col_offset,
+                                cell(text, color=GREEN if agrees else (RED if abbr else None)))
+            else:
+                prop         = c["proposed"]
+                json_abbr    = c.get("_json_abbr", "—")
+                proposed_val = prop["abbr"]
 
                 tbl.setItem(row, 0, cell(f"#{c['overall']}"))
                 tbl.setItem(row, 1, cell(f"R{c.get('round', '?')}"))
                 tbl.setItem(row, 2, cell(json_abbr))
-                tbl.setItem(row, 3, cell(
-                    f"{prop['abbr']}  —  {prop['team']}",
-                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                ))
+                tbl.setItem(row, 3, cell(f"{prop['abbr']}  —  {prop['team']}", align=left))
 
                 for col_offset, src in enumerate(sources):
                     abbr   = verdicts.get(src)
-                    agrees = abbr == prop["abbr"]
+                    agrees = abbr == proposed_val
                     icon   = "✓" if agrees else "✗"
                     text   = f"{icon}  {abbr}" if abbr else "—"
                     tbl.setItem(row, len(fixed_headers) + col_offset,
                                 cell(text, color=GREEN if agrees else RED))
-            else:
-                # Future pick row — span all columns
-                action = c["action"].upper()
-                text   = (f"{action}  {c.get('year')} R{c.get('round')}  "
-                          f"{c.get('original_abbr')} → {c.get('current_abbr')}")
-                tbl.setItem(row, 0, cell(text, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft))
-                tbl.setSpan(row, 0, 1, len(all_headers))
 
         tbl.resizeRowsToContents()
-
-        # Size dialog to fit table comfortably
-        tbl.setMinimumHeight(min(400, 40 + len(changes) * 30))
+        tbl.setMinimumHeight(min(500, 60 + len(changes) * 28))
         layout.addWidget(tbl)
 
         btn_row = QHBoxLayout()

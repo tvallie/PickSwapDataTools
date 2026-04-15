@@ -110,20 +110,43 @@ class ScraperWorker(QThread):
         else:
             import datetime
             current_year = datetime.date.today().year
-            # Strip current-year picks — they belong to current mode, not future
+            # Keep only future years AND only traded picks (original != current)
             filtered = {
-                src: [p for p in picks if p.get("year", 0) > current_year]
+                src: [
+                    p for p in picks
+                    if p.get("year", 0) > current_year
+                    and p.get("original_abbr") != p.get("current_abbr")
+                ]
                 for src, picks in successful.items()
             }
             filtered = {src: picks for src, picks in filtered.items() if picks}
             if not filtered:
-                self.log_message.emit("WARN", f"No future picks (year > {current_year}) found in scraped data.")
+                self.log_message.emit("WARN", f"No traded future picks (year > {current_year}) found in scraped data.")
                 self.scrape_complete.emit([], {})
                 return True
             cross_conflicts = diff_future_picks(filtered) if len(filtered) >= 2 else []
             consensus       = self._majority_vote_future(filtered) if len(filtered) >= 2 \
                               else list(filtered.values())[0]
             changes         = compare_future_to_existing(consensus, existing["traded_picks"])
+
+            # Annotate each change with what every source says
+            from fetch_draft_picks.differ import _future_key
+            for c in changes:
+                key = (c.get("year"), c.get("round"), c.get("original_abbr"))
+                if c["action"] == "add":
+                    proposed_curr = c["current_abbr"]
+                elif c["action"] == "update":
+                    proposed_curr = c["current_abbr"]["proposed"]
+                else:
+                    proposed_curr = None  # remove
+                c["_source_verdicts"] = {
+                    src: next(
+                        (p["current_abbr"] for p in picks if _future_key(p) == key),
+                        None
+                    )
+                    for src, picks in filtered.items()
+                }
+                c["_proposed_curr"] = proposed_curr
 
         src_count = len(successful)
         self.log_message.emit("INFO", f"Sources with data: {src_count}")
