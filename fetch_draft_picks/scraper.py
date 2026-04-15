@@ -272,6 +272,89 @@ def _parse_realgm_future(html: str) -> list[dict]:
     raise NotImplementedError("RealGM future: use Claude fallback")
 
 
+# ── Spotrac future picks parser ───────────────────────────────────────────────
+
+def _parse_spotrac_year(html: str, year: int) -> list[dict]:
+    """Parse one Spotrac /nfl/draft/picks/_/year/{year} page."""
+    soup = BeautifulSoup(html, "html.parser")
+    picks = []
+
+    view_table = soup.find("div", id="view-table")
+    if not view_table:
+        raise ValueError(f"Spotrac {year}: div#view-table not found")
+
+    round_num = 0
+    for element in view_table.children:
+        if not hasattr(element, "name"):
+            continue
+        if element.name == "header":
+            h2 = element.find("h2")
+            if h2:
+                text = h2.get_text(strip=True)  # "Round 1", "Round 2", …
+                import re as _re
+                m = _re.search(r"\d+", text)
+                if m:
+                    round_num = int(m.group())
+        elif element.name == "div" and round_num:
+            table = element.find("table")
+            if not table:
+                continue
+            for row in table.find_all("tr"):
+                tds = row.find_all("td")
+                if len(tds) < 3:
+                    continue  # skip header rows
+
+                # Current owner abbreviation — div.d-block inside td[1]
+                abbr_div = tds[1].find("div", class_="d-block")
+                if not abbr_div:
+                    continue
+                current_abbr = abbr_div.get_text(strip=True).upper()
+                if not current_abbr or len(current_abbr) > 3:
+                    continue
+
+                # Trade chain — td[2] text; empty if not traded
+                chain_text = tds[2].get_text(strip=True)
+                if chain_text:
+                    parts = [p.strip() for p in chain_text.split(">")]
+                    original_abbr = parts[0].upper() if parts else current_abbr
+                else:
+                    original_abbr = current_abbr
+
+                picks.append({
+                    "year":          year,
+                    "round":         round_num,
+                    "original_abbr": original_abbr,
+                    "current_abbr":  current_abbr,
+                })
+
+    if not picks:
+        raise ValueError(f"Spotrac {year}: no picks parsed")
+    return picks
+
+
+def _parse_spotrac_future(html: str) -> list[dict]:
+    """Parse Spotrac future picks for all relevant future years."""
+    import datetime
+    this_year = datetime.date.today().year
+    future_years = range(this_year + 1, this_year + 3)  # e.g. 2027, 2028
+
+    # html is already fetched for the first year — parse it
+    first_year = future_years.start
+    picks = _parse_spotrac_year(html, first_year)
+
+    # Fetch remaining years internally
+    for year in range(future_years.start + 1, future_years.stop):
+        try:
+            extra_html = fetch_html(
+                f"https://www.spotrac.com/nfl/draft/picks/_/year/{year}"
+            )
+            picks += _parse_spotrac_year(extra_html, year)
+        except Exception as e:
+            logger.warning("[spotrac] Failed to fetch year %s: %s", year, e)
+
+    return picks
+
+
 # ── ESPN Core API parser ──────────────────────────────────────────────────────
 
 def _parse_espn_api_current(json_text: str) -> list[dict]:
@@ -447,10 +530,11 @@ CURRENT_SOURCES = [
 ]
 
 FUTURE_SOURCES = [
-    Source("overthecap",       "https://overthecap.com/draft",                                          "future", _parse_overthecap_future,    priority=0),
-    Source("tankathon-future", "https://www.tankathon.com/picks/future_picks",                          "future", _parse_tankathon_future,     priority=1),
-    Source("nfltraderumors",   "https://www.nfltraderumors.co/future-draft-picks",                      "future", _parse_nfltraderumors_future, priority=2),
-    Source("realgm",           "https://football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team", "future", _parse_realgm_future,    priority=3),
+    Source("spotrac",          "https://www.spotrac.com/nfl/draft/picks/_/year/2027",                      "future", _parse_spotrac_future,      priority=0),
+    Source("overthecap",       "https://overthecap.com/draft",                                             "future", _parse_overthecap_future,   priority=1),
+    Source("tankathon-future", "https://www.tankathon.com/picks/future_picks",                             "future", _parse_tankathon_future,    priority=2),
+    Source("nfltraderumors",   "https://www.nfltraderumors.co/future-draft-picks",                         "future", _parse_nfltraderumors_future, priority=3),
+    Source("realgm",           "https://football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team", "future", _parse_realgm_future,       priority=4),
 ]
 
 NEWS_URLS = [
