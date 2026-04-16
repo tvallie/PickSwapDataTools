@@ -127,3 +127,15 @@ def compare_future_to_existing(
         if key not in scraped_idx:
             changes.append({"action": "remove", **ex})
     return changes
+
+
+def diff_current_history(scraped: list[dict], existing: list[dict]) -> list[dict]:
+    """Return scraped history entries not already in existing."""
+    keys = {(e["overall"], e["date"], e["from"], e["to"]) for e in existing}
+    return [e for e in scraped if (e["overall"], e["date"], e["from"], e["to"]) not in keys]
+
+
+def diff_future_history(scraped: list[dict], existing: list[dict]) -> list[dict]:
+    """Return scraped history entries not already in existing."""
+    keys = {(e["year"], e["round"], e["original_abbr"], e["date"], e["from"], e["to"]) for e in existing}
+    return [e for e in scraped if (e["year"], e["round"], e["original_abbr"], e["date"], e["from"], e["to"]) not in keys]
