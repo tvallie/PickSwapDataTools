@@ -22,6 +22,8 @@ JSON_DIR     = Path("/Users/todd/CodingProjects/PickSwapWeb/json")
 CURRENT_JSON = JSON_DIR / "draft_order_current.json"
 FUTURE_JSON  = JSON_DIR / "future_pick_trades.json"
 ARCHIVE_DIR  = JSON_DIR / "archive"
+CURRENT_HISTORY = JSON_DIR / "current_pick_history.json"
+FUTURE_HISTORY  = JSON_DIR / "future_pick_history.json"
 
 LAUNCH, SCRAPING, REVIEW = 0, 1, 2
 
@@ -57,9 +59,7 @@ class MainWindow(QMainWindow):
         self._mode    = mode
         self._dry_run = dry_run
 
-        if mode == "both":
-            names = [s.name for s in CURRENT_SOURCES] + [s.name for s in FUTURE_SOURCES]
-        elif mode == "current":
+        if mode == "current":
             names = [s.name for s in CURRENT_SOURCES]
         else:
             names = [s.name for s in FUTURE_SOURCES]
@@ -81,6 +81,10 @@ class MainWindow(QMainWindow):
         self._go_to_launch()
 
     def _on_scrape_complete(self, changes: list, ai: dict):
+        if self._worker and self._worker.pdf_errors:
+            errs = "\n".join(self._worker.pdf_errors)
+            QMessageBox.warning(self, "PDF Import Failed",
+                f"One or more PDF sources failed to parse and were excluded from the comparison:\n\n{errs}")
         if not changes:
             QMessageBox.information(self, "No Changes", "Scraped data matches your JSON — no changes needed.")
             self._go_to_launch()
@@ -92,7 +96,7 @@ class MainWindow(QMainWindow):
             return
         self._review.load_changes(changes, ai, self._mode)
         self._stack.setCurrentIndex(REVIEW)
-        self.resize(540, 480)
+        self.resize(800, 560)
 
     def _show_dry_run_dialog(self, changes: list):
         # Detect mode from change structure
@@ -244,8 +248,10 @@ class MainWindow(QMainWindow):
         self._go_to_launch()
 
     def _apply_and_write(self, accepted: list):
-        from fetch_draft_picks.deployer import archive_json
-        from fetch_draft_picks.differ   import _future_key
+        from fetch_draft_picks.deployer      import archive_json
+        from fetch_draft_picks.differ        import _future_key
+        from fetch_draft_picks.pdf_importer  import archive_processed_pdfs
+        from fetch_draft_picks.historian     import append_current_history, append_future_history
         date_str = datetime.now().strftime("%Y-%m-%d")
         now_str  = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -263,6 +269,13 @@ class MainWindow(QMainWindow):
             data["generated_at"] = now_str
             with open(CURRENT_JSON, "w") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            append_current_history(
+                [x for x in accepted if "overall" in x],
+                date_str,
+                CURRENT_HISTORY,
+            )
+            if self._worker:
+                archive_processed_pdfs(self._worker.pdf_results.get("current", []), date_str)
 
         if self._mode in ("future", "both"):
             with open(FUTURE_JSON) as f:
@@ -281,6 +294,13 @@ class MainWindow(QMainWindow):
             data["generated_at"] = now_str
             with open(FUTURE_JSON, "w") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            append_future_history(
+                [x for x in accepted if "action" in x],
+                date_str,
+                FUTURE_HISTORY,
+            )
+            if self._worker:
+                archive_processed_pdfs(self._worker.pdf_results.get("future", []), date_str)
 
     def _upload(self):
         from fetch_draft_picks.deployer import upload_files
