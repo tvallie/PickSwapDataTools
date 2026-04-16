@@ -8,7 +8,8 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 
 class LaunchPanel(QWidget):
-    run_requested = pyqtSignal(str, bool)  # mode, dry_run
+    run_requested     = pyqtSignal(str, bool)   # mode, dry_run
+    history_requested = pyqtSignal(bool, bool)  # current_history, future_history
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -26,24 +27,37 @@ class LaunchPanel(QWidget):
 
         root.addSpacerItem(QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
-        mode_label = QLabel("Mode")
+        # ── Scrape section ────────────────────────────────────────────────────
+        mode_label = QLabel("Scrape")
         root.addWidget(mode_label)
 
         self._mode_group    = QButtonGroup(self)
         self._radio_current = QRadioButton("Current Year")
         self._radio_future  = QRadioButton("Future Picks")
-        self._radio_both    = QRadioButton("Both")
         self._radio_current.setChecked(True)
-        for i, rb in enumerate([self._radio_current, self._radio_future, self._radio_both]):
+        for i, rb in enumerate([self._radio_current, self._radio_future]):
             self._mode_group.addButton(rb, i)
             root.addWidget(rb)
 
-        root.addSpacerItem(QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
+        root.addSpacerItem(QSpacerItem(0, 6, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
         self._dry_run_cb = QCheckBox("Dry Run (preview only, no files written)")
         self._dry_run_cb.setChecked(True)
         self._dry_run_cb.checkStateChanged.connect(self._update_button_label)
         root.addWidget(self._dry_run_cb)
+
+        root.addSpacerItem(QSpacerItem(0, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
+
+        # ── View History section ──────────────────────────────────────────────
+        history_label = QLabel("View History")
+        root.addWidget(history_label)
+
+        self._history_current_cb = QCheckBox("Current Pick History")
+        self._history_future_cb  = QCheckBox("Future Pick History")
+        self._history_current_cb.checkStateChanged.connect(self._update_button_label)
+        self._history_future_cb.checkStateChanged.connect(self._update_button_label)
+        root.addWidget(self._history_current_cb)
+        root.addWidget(self._history_future_cb)
 
         root.addSpacerItem(QSpacerItem(0, 20, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
 
@@ -58,10 +72,25 @@ class LaunchPanel(QWidget):
 
         root.addStretch()
 
+    def _history_mode(self) -> bool:
+        return (self._history_current_cb.isChecked() or
+                self._history_future_cb.isChecked())
+
     def _update_button_label(self):
-        self._run_btn.setText("▶  Preview" if self._dry_run_cb.isChecked() else "▶  Run")
+        if self._history_mode():
+            self._run_btn.setText("▶  View History")
+        elif self._dry_run_cb.isChecked():
+            self._run_btn.setText("▶  Preview")
+        else:
+            self._run_btn.setText("▶  Run")
 
     def _on_run(self):
-        mode_map = {0: "current", 1: "future", 2: "both"}
-        mode = mode_map.get(self._mode_group.checkedId(), "current")
-        self.run_requested.emit(mode, self._dry_run_cb.isChecked())
+        if self._history_mode():
+            self.history_requested.emit(
+                self._history_current_cb.isChecked(),
+                self._history_future_cb.isChecked(),
+            )
+        else:
+            mode_map = {0: "current", 1: "future"}
+            mode = mode_map.get(self._mode_group.checkedId(), "current")
+            self.run_requested.emit(mode, self._dry_run_cb.isChecked())
