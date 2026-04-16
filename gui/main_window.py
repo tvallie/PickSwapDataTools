@@ -49,6 +49,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._review)
 
         self._launch.run_requested.connect(self._on_run)
+        self._launch.history_requested.connect(self._on_history)
         self._scraping.cancel_requested.connect(self._on_cancel)
         self._review.review_complete.connect(self._on_review_complete)
         self._review.quit_review.connect(self._go_to_launch)
@@ -301,6 +302,67 @@ class MainWindow(QMainWindow):
             )
             if self._worker:
                 archive_processed_pdfs(self._worker.pdf_results.get("future", []), date_str)
+
+    def _on_history(self, want_current: bool, want_future: bool):
+        self._stack.setCurrentIndex(SCRAPING)
+        self._scraping.set_status("Scraping pick history from prosportstransactions.com…")
+        self._run_history(want_current, want_future)
+
+    def _run_history(self, want_current: bool, want_future: bool):
+        from fetch_draft_picks.scraper   import scrape_all_sources, CURRENT_HISTORY_SOURCES, FUTURE_HISTORY_SOURCES
+        from fetch_draft_picks.differ    import diff_current_history, diff_future_history
+
+        new_entries: list[dict] = []
+
+        if want_current:
+            results  = scrape_all_sources(CURRENT_HISTORY_SOURCES)
+            scraped  = [p for r in results if r["picks"] for p in r["picks"]]
+            existing = json.loads(CURRENT_HISTORY.read_text()).get("history", []) if CURRENT_HISTORY.exists() else []
+            new_entries += diff_current_history(scraped, existing)
+
+        if want_future:
+            results  = scrape_all_sources(FUTURE_HISTORY_SOURCES)
+            scraped  = [p for r in results if r["picks"] for p in r["picks"]]
+            existing = json.loads(FUTURE_HISTORY.read_text()).get("history", []) if FUTURE_HISTORY.exists() else []
+            new_entries += diff_future_history(scraped, existing)
+
+        if not new_entries:
+            QMessageBox.information(self, "No New Entries", "No new history entries found.")
+            self._stack.setCurrentIndex(LAUNCH)
+            return
+
+        if want_current and want_future:
+            mode = "both"
+        elif want_current:
+            mode = "current"
+        else:
+            mode = "future"
+
+        # Swap the review_complete handler so history entries are processed correctly
+        self._review.review_complete.disconnect(self._on_review_complete)
+        self._review.review_complete.connect(self._on_history_applied)
+
+        self._review.load_history(new_entries, mode)
+        self._stack.setCurrentIndex(REVIEW)
+        self.resize(900, 600)
+
+    def _on_history_applied(self, accepted: list):
+        from fetch_draft_picks.historian import append_current_history, append_future_history
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+        current_accepted = [e for e in accepted if "overall" in e]
+        future_accepted  = [e for e in accepted if "year"   in e and "overall" not in e]
+
+        if current_accepted:
+            append_current_history(current_accepted, date_str, CURRENT_HISTORY)
+        if future_accepted:
+            append_future_history(future_accepted, date_str, FUTURE_HISTORY)
+
+        # Restore the normal review_complete handler
+        self._review.review_complete.disconnect(self._on_history_applied)
+        self._review.review_complete.connect(self._on_review_complete)
+
+        self._go_to_launch()
 
     def _upload(self):
         from fetch_draft_picks.deployer import upload_files
