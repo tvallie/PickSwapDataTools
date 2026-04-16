@@ -1,9 +1,11 @@
-"""review.py — Panel 2: one change at a time approval UI."""
+"""review.py — Panel 2: grid-based change approval with checkboxes."""
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QFrame, QSpacerItem, QSizePolicy, QMessageBox,
+    QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QColor
+from gui.styles import GREEN, RED, AMBER
 
 
 class ReviewPanel(QWidget):
@@ -13,18 +15,13 @@ class ReviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._changes: list[dict] = []
-        self._ai: dict = {}
         self._mode = "current"
-        self._idx = 0
-        self._accepted: list[dict] = []
-        self._rejected: list[dict] = []
-        self._skipped:  list[dict] = []
         self._build_ui()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(32, 24, 32, 24)
-        root.setSpacing(16)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(12)
 
         header = QHBoxLayout()
         self._title = QLabel("Review Changes")
@@ -36,155 +33,234 @@ class ReviewPanel(QWidget):
         header.addWidget(self._counter)
         root.addLayout(header)
 
-        self._card = QFrame()
-        self._card.setObjectName("change_card")
-        self._card.setContentsMargins(12, 12, 12, 12)
-        card_layout = QVBoxLayout(self._card)
-        card_layout.setSpacing(8)
-        self._pick_label     = QLabel()
-        self._pick_label.setStyleSheet("font-size: 15px; font-weight: bold;")
-        self._current_label  = QLabel()
-        self._proposed_label = QLabel()
-        self._proposed_label.setStyleSheet("font-weight: bold;")
-        for w in [self._pick_label, self._current_label, self._proposed_label]:
-            card_layout.addWidget(w)
-        root.addWidget(self._card)
+        self._lbl = QLabel("")
+        root.addWidget(self._lbl)
 
-        self._ai_frame  = QFrame()
-        ai_layout = QVBoxLayout(self._ai_frame)
-        ai_layout.setContentsMargins(0, 0, 0, 0)
-        self._ai_header = QLabel("AI Analysis")
-        self._ai_header.setObjectName("ai_label")
-        self._ai_text   = QLabel()
-        self._ai_text.setWordWrap(True)
-        ai_layout.addWidget(self._ai_header)
-        ai_layout.addWidget(self._ai_text)
-        self._ai_frame.setVisible(False)
-        root.addWidget(self._ai_frame)
-
-        root.addStretch()
+        self._table = QTableWidget()
+        self._table.verticalHeader().setVisible(False)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self._table.setShowGrid(True)
+        root.addWidget(self._table)
 
         btn_row = QHBoxLayout()
-        self._accept_btn = QPushButton("Accept")
-        self._accept_btn.setObjectName("accept_btn")
-        self._accept_btn.clicked.connect(self._on_accept)
-        self._reject_btn = QPushButton("Reject")
-        self._reject_btn.setObjectName("reject_btn")
-        self._reject_btn.clicked.connect(self._on_reject)
-        self._skip_btn = QPushButton("Skip")
-        self._skip_btn.clicked.connect(self._on_skip)
-        self._quit_btn = QPushButton("Quit")
-        self._quit_btn.setObjectName("quit_btn")
-        self._quit_btn.clicked.connect(self._on_quit)
-        btn_row.addWidget(self._accept_btn)
-        btn_row.addWidget(self._reject_btn)
-        btn_row.addWidget(self._skip_btn)
+        self._select_all_btn = QPushButton("Select All")
+        self._select_all_btn.setFixedWidth(90)
+        self._select_all_btn.clicked.connect(self._select_all)
+        self._select_none_btn = QPushButton("Select None")
+        self._select_none_btn.setFixedWidth(90)
+        self._select_none_btn.clicked.connect(self._select_none)
+        btn_row.addWidget(self._select_all_btn)
+        btn_row.addWidget(self._select_none_btn)
         btn_row.addStretch()
-        btn_row.addWidget(self._quit_btn)
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setObjectName("quit_btn")
+        self._cancel_btn.setFixedWidth(80)
+        self._cancel_btn.clicked.connect(self.quit_review)
+        self._apply_btn = QPushButton("Apply Selected")
+        self._apply_btn.setObjectName("run_btn")
+        self._apply_btn.clicked.connect(self._on_apply)
+        btn_row.addWidget(self._cancel_btn)
+        btn_row.addWidget(self._apply_btn)
         root.addLayout(btn_row)
 
     def load_changes(self, changes: list[dict], ai: dict, mode: str):
-        self._changes  = list(changes)
-        self._ai       = ai
-        self._mode     = mode
-        self._idx      = 0
-        self._accepted = []
-        self._rejected = []
-        self._skipped  = []
-        self._show_current()
+        self._changes = list(changes)
+        self._mode    = mode
+        self._build_table(changes, ai, mode)
 
-    def _show_current(self):
-        if self._idx >= len(self._changes):
-            self._finish()
+    def load_history(self, entries: list[dict], mode: str):
+        """Display new history entries for approval. mode: 'current', 'future', or 'both'."""
+        self._changes = list(entries)
+        self._mode    = f"history_{mode}"
+        self._build_history_table(entries, mode)
+
+    def _build_history_table(self, entries: list[dict], mode: str):
+        if mode == "current":
+            headers = ["", "Pick", "Rnd", "Date", "From", "To"]
+        elif mode == "future":
+            headers = ["", "Year", "Rnd", "Original", "Date", "From", "To"]
+        else:  # both
+            headers = ["", "Type", "Pick/Year", "Rnd", "Original", "Date", "From", "To"]
+
+        self._table.setColumnCount(len(headers))
+        self._table.setRowCount(len(entries))
+        self._table.setHorizontalHeaderLabels(headers)
+
+        hdr = self._table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(0, 40)
+        for col in range(1, len(headers)):
+            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(len(headers) - 1, QHeaderView.ResizeMode.Stretch)
+
+        def cell(text, color=None):
+            item = QTableWidgetItem(str(text))
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if color:
+                item.setForeground(QColor(color))
+            return item
+
+        def checkbox():
+            item = QTableWidgetItem()
+            item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            item.setCheckState(Qt.CheckState.Checked)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            return item
+
+        for row, e in enumerate(entries):
+            self._table.setItem(row, 0, checkbox())
+            if mode == "current":
+                self._table.setItem(row, 1, cell(f"#{e.get('overall', '?')}"))
+                self._table.setItem(row, 2, cell(f"R{e.get('round', '?')}"))
+                self._table.setItem(row, 3, cell(e.get("date", "?")))
+                self._table.setItem(row, 4, cell(e.get("from", "?"), color=RED))
+                self._table.setItem(row, 5, cell(e.get("to", "?"),   color=GREEN))
+            elif mode == "future":
+                self._table.setItem(row, 1, cell(str(e.get("year", "?"))))
+                self._table.setItem(row, 2, cell(f"R{e.get('round', '?')}"))
+                self._table.setItem(row, 3, cell(e.get("original_abbr", "?")))
+                self._table.setItem(row, 4, cell(e.get("date", "?")))
+                self._table.setItem(row, 5, cell(e.get("from", "?"), color=RED))
+                self._table.setItem(row, 6, cell(e.get("to", "?"),   color=GREEN))
+            else:  # both
+                kind = "Current" if "overall" in e else "Future"
+                self._table.setItem(row, 1, cell(kind))
+                pick_year = f"#{e['overall']}" if "overall" in e else str(e.get("year", "?"))
+                self._table.setItem(row, 2, cell(pick_year))
+                self._table.setItem(row, 3, cell(f"R{e.get('round', '?')}"))
+                self._table.setItem(row, 4, cell(e.get("original_abbr", "—")))
+                self._table.setItem(row, 5, cell(e.get("date", "?")))
+                self._table.setItem(row, 6, cell(e.get("from", "?"), color=RED))
+                self._table.setItem(row, 7, cell(e.get("to", "?"),   color=GREEN))
+
+        self._table.resizeRowsToContents()
+        self._table.setMinimumHeight(min(500, 60 + len(entries) * 28))
+        self._lbl.setText(f"{len(entries)} new trade(s) found — check the ones to add to history:")
+        self._counter.setText(f"{len(entries)} new")
+
+    def _build_table(self, changes: list, ai: dict, mode: str):
+        is_future = mode == "future"
+
+        sources = []
+        for c in changes:
+            for s in c.get("_source_verdicts", {}):
+                if s not in sources:
+                    sources.append(s)
+
+        if is_future:
+            fixed = ["", "Action", "Year", "Rnd", "Original", "Your JSON", "Proposed"]
+        else:
+            fixed = ["", "Pick", "Rnd", "Your JSON", "Proposed Team"]
+
+        all_headers = fixed + sources
+        self._table.setColumnCount(len(all_headers))
+        self._table.setRowCount(len(changes))
+        self._table.setHorizontalHeaderLabels(all_headers)
+
+        hdr = self._table.horizontalHeader()
+        proposed_col = 6 if is_future else 4
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(0, 40)
+        for col in range(1, len(all_headers)):
+            if col == proposed_col:
+                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+            else:
+                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+
+        left = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+
+        def cell(text, align=Qt.AlignmentFlag.AlignCenter, color=None):
+            item = QTableWidgetItem(str(text))
+            item.setTextAlignment(align)
+            if color:
+                item.setForeground(QColor(color))
+            return item
+
+        def checkbox(checked=True):
+            item = QTableWidgetItem()
+            item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            return item
+
+        for row, c in enumerate(changes):
+            verdicts = c.get("_source_verdicts", {})
+            self._table.setItem(row, 0, checkbox(checked=False))
+
+            if is_future:
+                action       = c["action"].upper()
+                year         = c.get("year", "?")
+                rnd          = c.get("round", "?")
+                orig         = c.get("original_abbr", "?")
+                proposed_val = c.get("_proposed_curr")
+
+                if c["action"] == "add":
+                    json_val     = "not tracked"
+                    proposed_str = c.get("current_abbr", "?")
+                elif c["action"] == "update":
+                    ca           = c["current_abbr"]
+                    json_val     = ca.get("current", "?")
+                    proposed_str = ca.get("proposed", "?")
+                    proposed_val = proposed_str
+                else:
+                    json_val     = c.get("current_abbr", "?")
+                    proposed_str = "— remove —"
+                    proposed_val = None
+
+                action_color = {"ADD": GREEN, "UPDATE": AMBER, "REMOVE": RED}.get(action)
+                self._table.setItem(row, 1, cell(action, color=action_color))
+                self._table.setItem(row, 2, cell(str(year)))
+                self._table.setItem(row, 3, cell(f"R{rnd}"))
+                self._table.setItem(row, 4, cell(orig))
+                self._table.setItem(row, 5, cell(json_val))
+                self._table.setItem(row, 6, cell(proposed_str, align=left))
+
+                for off, src in enumerate(sources):
+                    abbr   = verdicts.get(src)
+                    agrees = (abbr == proposed_val) if proposed_val else False
+                    icon   = "✓" if agrees else ("✗" if abbr else "—")
+                    text   = f"{icon}  {abbr}" if abbr else "—"
+                    self._table.setItem(row, len(fixed) + off,
+                                        cell(text, color=GREEN if agrees else (RED if abbr else None)))
+            else:
+                prop         = c["proposed"]
+                json_abbr    = c.get("_json_abbr", "—")
+                proposed_val = prop["abbr"]
+
+                self._table.setItem(row, 1, cell(f"#{c['overall']}"))
+                self._table.setItem(row, 2, cell(f"R{c.get('round', '?')}"))
+                self._table.setItem(row, 3, cell(json_abbr))
+                self._table.setItem(row, 4, cell(f"{prop['abbr']}  —  {prop['team']}", align=left))
+
+                for off, src in enumerate(sources):
+                    abbr   = verdicts.get(src)
+                    agrees = abbr == proposed_val
+                    icon   = "✓" if agrees else "✗"
+                    text   = f"{icon}  {abbr}" if abbr else "—"
+                    self._table.setItem(row, len(fixed) + off,
+                                        cell(text, color=GREEN if agrees else RED))
+
+        self._table.resizeRowsToContents()
+        self._table.setMinimumHeight(min(500, 60 + len(changes) * 28))
+        self._lbl.setText(f"{len(changes)} proposed change(s) — check the ones to apply:")
+        self._counter.setText(f"{len(changes)} change(s)")
+
+    def _select_all(self):
+        for row in range(self._table.rowCount()):
+            self._table.item(row, 0).setCheckState(Qt.CheckState.Checked)
+
+    def _select_none(self):
+        for row in range(self._table.rowCount()):
+            self._table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
+
+    def _on_apply(self):
+        accepted = [
+            self._changes[row]
+            for row in range(self._table.rowCount())
+            if self._table.item(row, 0).checkState() == Qt.CheckState.Checked
+        ]
+        if not accepted:
+            QMessageBox.information(self, "Nothing Selected", "No changes selected — nothing will be written.")
             return
-        change = self._changes[self._idx]
-        self._counter.setText(f"{self._idx + 1} of {len(self._changes)}")
-        if self._mode == "current":
-            self._render_current(change)
-        else:
-            self._render_future(change)
-        key     = self._ai_key(change)
-        ai_data = self._ai.get(key)
-        if ai_data:
-            self._ai_header.setText(f"AI Analysis  ({ai_data.get('confidence', '?')} confidence)")
-            self._ai_text.setText(ai_data.get("summary", ""))
-            self._ai_frame.setVisible(True)
-        else:
-            self._ai_frame.setVisible(False)
-
-    def _render_current(self, change: dict):
-        overall = change["overall"]
-        self._pick_label.setText(
-            f"Pick #{overall}  —  Round {change.get('round', '?')}, Pick {change.get('pick_in_round', '?')}"
-        )
-        curr = change.get("current")
-        prop = change["proposed"]
-        self._current_label.setText(
-            f"Current:    {curr['team']}  ({curr['abbr']})" if curr else "Current:    (new pick slot)"
-        )
-        orig = prop.get("original_team", "")
-        orig_str = f"   (orig: {orig})" if orig and orig != prop["team"] else ""
-        self._proposed_label.setText(f"Proposed:  {prop['team']}  ({prop['abbr']}){orig_str}")
-
-    def _render_future(self, change: dict):
-        action = change["action"]
-        year   = change.get("year", "?")
-        round_ = change.get("round", "?")
-        orig   = change.get("original_abbr", "?")
-        self._pick_label.setText(f"{action.upper()}  —  {year} Round {round_}")
-        if action == "add":
-            self._current_label.setText("Current:    (not in database)")
-            self._proposed_label.setText(f"Proposed:  {orig} → {change.get('current_abbr', '?')}")
-        elif action == "update":
-            c = change["current_abbr"]
-            self._current_label.setText(f"Current:    {orig} → {c['current']}")
-            self._proposed_label.setText(f"Proposed:  {orig} → {c['proposed']}")
-        elif action == "remove":
-            self._current_label.setText(f"Current:    {orig} → {change.get('current_abbr', '?')}")
-            self._proposed_label.setText("Proposed:  (remove from database)")
-
-    def _ai_key(self, change: dict) -> str:
-        if self._mode == "current":
-            return str(change.get("overall", ""))
-        return f"{change.get('year')}_{change.get('round')}_{change.get('original_abbr')}"
-
-    def _on_accept(self):
-        self._accepted.append(self._changes[self._idx])
-        self._advance()
-
-    def _on_reject(self):
-        self._rejected.append(self._changes[self._idx])
-        self._advance()
-
-    def _on_skip(self):
-        self._skipped.append(self._changes[self._idx])
-        self._advance()
-
-    def _on_quit(self):
-        self.quit_review.emit()
-
-    def _advance(self):
-        self._idx += 1
-        if self._idx >= len(self._changes):
-            if self._skipped:
-                reply = QMessageBox.question(
-                    self, "Skipped Items",
-                    f"{len(self._skipped)} item(s) skipped. Review them now?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    self._changes = self._skipped
-                    self._skipped = []
-                    self._idx     = 0
-                    self._show_current()
-                    return
-            self._finish()
-        else:
-            self._show_current()
-
-    def _finish(self):
-        QMessageBox.information(
-            self, "Review Complete",
-            f"Accepted: {len(self._accepted)}  |  Rejected: {len(self._rejected)}"
-        )
-        self.review_complete.emit(self._accepted)
+        self.review_complete.emit(accepted)
