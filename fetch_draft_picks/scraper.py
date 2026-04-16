@@ -684,6 +684,39 @@ def _parse_prosports_current(html: str) -> list[dict]:
 
 # ── History source registries ─────────────────────────────────────────────────
 
+def _parse_prosports_future_history(html: str, year: int) -> list[dict]:
+    """Parse prosportstransactions.com DraftTrades/Years/<year>.htm for future picks.
+
+    Same table structure as current. Returns list of dicts:
+      {"year": int, "round": int, "original_abbr": "ABR",
+       "date": "YYYY-MM-DD", "from": "ABR", "to": "ABR"}
+    The original_abbr is the team that first gave up the pick (= the "from" in the
+    most-recent trade row, which prosportstransactions puts in td[2]).
+    """
+    raw = _parse_prosports_trade_rows(html, year)
+    return [
+        {
+            "year":          e["year"],
+            "round":         e["round"],
+            "original_abbr": e["from"],   # team that traded it away most recently
+            "date":          e["date"],
+            "from":          e["from"],
+            "to":            e["to"],
+        }
+        for e in raw
+    ]
+
+
+def _parse_prosports_future_2027(html: str) -> list[dict]:
+    return _parse_prosports_future_history(html, 2027)
+
+
+def _parse_prosports_future_2028(html: str) -> list[dict]:
+    return _parse_prosports_future_history(html, 2028)
+
+
+# ── History source registries ─────────────────────────────────────────────────
+
 CURRENT_HISTORY_SOURCES = [
     Source(
         "prosportstransactions-current",
@@ -691,6 +724,25 @@ CURRENT_HISTORY_SOURCES = [
         "history_current",
         _parse_prosports_current,
         priority=0,
+        use_playwright=True,
+    ),
+]
+
+FUTURE_HISTORY_SOURCES = [
+    Source(
+        "prosportstransactions-future-2027",
+        "https://prosportstransactions.com/football/DraftTrades/Years/2027.htm",
+        "history_future",
+        _parse_prosports_future_2027,
+        priority=0,
+        use_playwright=True,
+    ),
+    Source(
+        "prosportstransactions-future-2028",
+        "https://prosportstransactions.com/football/DraftTrades/Years/2028.htm",
+        "history_future",
+        _parse_prosports_future_2028,
+        priority=1,
         use_playwright=True,
     ),
 ]
