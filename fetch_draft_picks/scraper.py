@@ -26,6 +26,7 @@ class Source:
     mode: str           # "current" or "future" or "news"
     parse_fn: Callable  # fn(html: str) -> list[dict]
     priority: int = 0   # lower = tried first
+    use_playwright: bool = False
 
 
 # Registry — populated at bottom of file
@@ -41,15 +42,33 @@ def fetch_html(url: str, timeout: int = 20) -> str:
     return resp.text
 
 
+def fetch_html_playwright(url: str) -> str:
+    """Fetch rendered HTML via headless Chromium. Use for JS-heavy or WAF-protected sites."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent=HEADERS["User-Agent"],
+            viewport={"width": 1280, "height": 900},
+            locale="en-US",
+        )
+        page = ctx.new_page()
+        page.goto(url, timeout=30000, wait_until="domcontentloaded")
+        html = page.content()
+        browser.close()
+    return html
+
+
 def scrape_source(source: Source) -> dict:
     """Attempt Python scraping; return result dict with metadata."""
     t0 = time.time()
     try:
-        html = fetch_html(source.url)
+        html = fetch_html_playwright(source.url) if source.use_playwright else fetch_html(source.url)
         picks = source.parse_fn(html)
         elapsed = round(time.time() - t0, 1)
-        logger.info("[scraper] %-30s OK  (python)   %.1fs", source.name, elapsed)
-        return {"source": source.name, "picks": picks, "method": "python",
+        method = "playwright" if source.use_playwright else "python"
+        logger.info("[scraper] %-30s OK  (%s)   %.1fs", source.name, method, elapsed)
+        return {"source": source.name, "picks": picks, "method": method,
                 "elapsed": elapsed, "error": None}
     except Exception as e:
         elapsed = round(time.time() - t0, 1)
@@ -163,113 +182,104 @@ def _parse_tankathon_current(html: str) -> list[dict]:
     return picks
 
 
-def _parse_espn_current(html: str) -> list[dict]:
-    raise NotImplementedError("ESPN current: JS-rendered, use Claude fallback")
-
-
-def _parse_nfldraftbuzz_current(html: str) -> list[dict]:
-    raise NotImplementedError("NFLDraftBuzz current: blocked, use Claude fallback")
-
-
-def _parse_pfr_current(html: str) -> list[dict]:
-    """Parse Pro-Football-Reference draft table."""
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table", {"id": "drafts"})
-    if not table:
-        raise ValueError("PFR draft table not found")
-    picks = []
-    for row in table.select("tbody tr:not(.thead)"):
-        cells = row.find_all("td")
-        if len(cells) < 4:
-            continue
-        try:
-            overall = int(row.find("td", {"data-stat": "pick_overall"}).get_text(strip=True))
-        except (AttributeError, ValueError):
-            continue
-        team_td = row.find("td", {"data-stat": "team"})
-        if not team_td:
-            continue
-        team_name = team_td.get_text(strip=True)
-        abbr = _normalize_abbr(team_name)
-        picks.append({
-            "overall": overall,
-            "round": _round_for_overall(overall),
-            "pick_in_round": _pick_in_round(overall),
-            "team": team_name,
-            "abbr": abbr,
-            "is_comp": False,
-            "original_team": team_name,
-        })
-    if not picks:
-        raise ValueError("No picks parsed from PFR page")
-    return picks
-
-
-def _parse_nflmockdb_current(html: str) -> list[dict]:
-    raise NotImplementedError("NFLMockDB current: JS-rendered, use Claude fallback")
-
 
 def _parse_si_current(html: str) -> list[dict]:
-    raise NotImplementedError("SI current: JS-rendered, use Claude fallback")
+    """Parse SI draft order article — numbered list with optional (via ABBR) trade notes."""
+    import re
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer"]):
+        tag.decompose()
+    lines = [l.strip() for l in soup.get_text(separator="\n").split("\n") if l.strip()]
 
+    picks = []
+    current_round = 0
+    overall = 0
+    for line in lines:
+        round_m = re.fullmatch(r"Round\s+(\d+)", line)
+        if round_m:
+            current_round = int(round_m.group(1))
+            continue
+        if not current_round:
+            continue
+        pick_m = re.match(r"^(\d+)\.\s+(.+)$", line)
+        if not pick_m:
+            continue
+        pick_num = int(pick_m.group(1))
+        rest = pick_m.group(2).strip()
+        # Extract "(via ABBR)" trade note if present
+        via_m = re.search(r"\(via\s+([A-Z]{2,3})\)", rest)
+        orig_abbr = via_m.group(1) if via_m else None
+        team_name = re.sub(r"\s*\(via\s+[A-Z]{2,3}\)", "", rest).strip()
+        abbr = _normalize_abbr(team_name)
+        original_team = _ABBR_TEAM.get(orig_abbr, team_name) if orig_abbr else team_name
+        overall = pick_num
+        picks.append({
+            "overall":       overall,
+            "round":         current_round,
+            "pick_in_round": _pick_in_round(overall),
+            "team":          team_name,
+            "abbr":          abbr,
+            "is_comp":       pick_num > current_round * 32,
+            "original_team": original_team,
+        })
 
-def _parse_prosportstrans_current(html: str) -> list[dict]:
-    raise NotImplementedError("ProSportsTrans: use Claude fallback")
+    if not picks:
+        raise ValueError("No picks parsed from SI page")
+    return picks
 
 
 # ── Future pick parsers ───────────────────────────────────────────────────────
 
-def _parse_tankathon_future(html: str) -> list[dict]:
-    """Parse Tankathon future picks page — team-class divs with pick rows."""
-    soup = BeautifulSoup(html, "html.parser")
-    picks = []
 
-    # Tankathon organizes future picks by current owner (team sections)
-    # Each section has a team class like .BUF, .MIA etc. and contains pick rows
-    for team_div in soup.select("div[class]"):
-        classes = team_div.get("class", [])
-        current_abbr = None
-        for cls in classes:
-            if cls.upper() in _ABBR_TEAM:
-                current_abbr = cls.upper()
-                break
-        if not current_abbr:
+def _parse_realgm_future(html: str) -> list[dict]:
+    """Parse RealGM future picks page — team sections with 'YEAR Xth Round: To ABBR' lines."""
+    import re
+    import datetime
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer"]):
+        tag.decompose()
+    lines = [l.strip() for l in soup.get_text(separator="\n").split("\n") if l.strip()]
+
+    this_year = datetime.date.today().year
+    picks = []
+    current_team_abbr = None
+
+    for line in lines:
+        # Team section header: "Arizona Cardinals Draft Picks"
+        team_m = re.match(r"^(.+?)\s+Draft Picks$", line)
+        if team_m:
+            current_team_abbr = _normalize_abbr(team_m.group(1))
             continue
 
-        # Each pick row within the section lists year, round, original team
-        for row in team_div.select("div.pick-row, tr.pick-row, div[class*='future']"):
-            text = row.get_text(" ", strip=True)
-            # Look for patterns like "2027 Round 1" or "Round 2 2027"
-            import re
-            year_m = re.search(r"20(2[5-9]|3\d)", text)
-            round_m = re.search(r"[Rr]ound\s*(\d)", text)
-            orig_m = re.search(r"\b([A-Z]{2,3})\b", text)
-            if not (year_m and round_m):
-                continue
-            year = int(year_m.group())
-            round_ = int(round_m.group(1))
-            orig_abbr = orig_m.group(1) if orig_m else current_abbr
+        if not current_team_abbr:
+            continue
+
+        # Pick line: "2027 1st Round: To NYJ" or "2027 2nd Round: Own"
+        pick_m = re.match(r"^(20\d{2})\s+(\d+)[a-z]+\s+Round:\s+(.+)$", line, re.IGNORECASE)
+        if not pick_m:
+            continue
+        year = int(pick_m.group(1))
+        round_ = int(pick_m.group(2))
+        status = pick_m.group(3).strip()
+
+        if year <= this_year:
+            continue  # only future picks
+        if status == "Own":
+            continue  # not traded
+
+        # "To ABBR" — this team's pick was traded to another team
+        to_m = re.match(r"To\s+([A-Z]{2,3})(?:;|$)", status)
+        if to_m:
             picks.append({
-                "year": year, "round": round_,
-                "original_abbr": orig_abbr,
-                "current_abbr": current_abbr,
+                "year":          year,
+                "round":         round_,
+                "original_abbr": current_team_abbr,
+                "current_abbr":  to_m.group(1),
             })
 
     if not picks:
-        raise ValueError("No future picks parsed from Tankathon")
+        raise ValueError("No future picks parsed from RealGM page")
     return picks
-
-
-def _parse_overthecap_future(html: str) -> list[dict]:
-    raise NotImplementedError("OverTheCap future: use Claude fallback")
-
-
-def _parse_nfltraderumors_future(html: str) -> list[dict]:
-    raise NotImplementedError("NFLTradeRumors future: use Claude fallback")
-
-
-def _parse_realgm_future(html: str) -> list[dict]:
-    raise NotImplementedError("RealGM future: use Claude fallback")
 
 
 # ── Spotrac future picks parser ───────────────────────────────────────────────
@@ -519,26 +529,168 @@ def scrape_all_sources(sources: list[Source]) -> list[dict]:
 # ── Source registry ───────────────────────────────────────────────────────────
 
 CURRENT_SOURCES = [
-    Source("espn-api",       "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2026/draft/rounds", "current", _parse_espn_api_current,      priority=0),
-    Source("tankathon",      "https://www.tankathon.com/nfl/full_draft",                                                  "current", _parse_tankathon_current,     priority=1),
-    Source("espn",           "https://www.espn.com/nfl/draft/rounds/_/season/2026",                                      "current", _parse_espn_current,          priority=2),
-    Source("nfldraftbuzz",   "https://www.nfldraftbuzz.com/DraftOrder/2026",                                              "current", _parse_nfldraftbuzz_current,  priority=3),
-    Source("prosportstrans", "https://prosportstransactions.com/football/DraftTrades/Years/2026.htm",                     "current", _parse_prosportstrans_current, priority=4),
-    Source("si",             "https://www.si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds",  "current", _parse_si_current,             priority=5),
-    Source("nflmockdraftdb", "https://www.nflmockdraftdatabase.com/draft-order/2026-nfl-draft-order",                    "current", _parse_nflmockdb_current,     priority=6),
-    Source("pro-football-ref", "https://www.pro-football-reference.com/years/2026/draft.htm",                            "current", _parse_pfr_current,           priority=7),
+    Source("espn-api",  "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2026/draft/rounds", "current", _parse_espn_api_current,  priority=0),
+    Source("tankathon", "https://www.tankathon.com/nfl/full_draft",                                                  "current", _parse_tankathon_current, priority=1),
+    Source("si",        "https://www.si.com/nfl/updated-2026-nfl-draft-order-full-list-of-picks-all-seven-rounds",  "current", _parse_si_current,        priority=2, use_playwright=True),
 ]
 
 FUTURE_SOURCES = [
-    Source("spotrac",          "https://www.spotrac.com/nfl/draft/picks/_/year/2027",                      "future", _parse_spotrac_future,      priority=0),
-    Source("overthecap",       "https://overthecap.com/draft",                                             "future", _parse_overthecap_future,   priority=1),
-    Source("tankathon-future", "https://www.tankathon.com/picks/future_picks",                             "future", _parse_tankathon_future,    priority=2),
-    Source("nfltraderumors",   "https://www.nfltraderumors.co/future-draft-picks",                         "future", _parse_nfltraderumors_future, priority=3),
-    Source("realgm",           "https://football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team", "future", _parse_realgm_future,       priority=4),
+    Source("spotrac", "https://www.spotrac.com/nfl/draft/picks/_/year/2027",                       "future", _parse_spotrac_future, priority=0),
+    Source("realgm",  "https://football.realgm.com/analysis/3656/NFL-Future-Draft-Picks-By-Team", "future", _parse_realgm_future,  priority=1, use_playwright=True),
 ]
 
 NEWS_URLS = [
     "https://profootballtalk.nbcsports.com",
     "https://www.nfl.com/news",
     "https://www.espn.com/nfl/",
+]
+
+# ── prosportstransactions.com helpers ─────────────────────────────────────────
+
+# Nickname (team mascot) → abbreviation map for prosportstransactions.com pages.
+# The site uses mascot nicknames in img alt attributes (e.g., "Falcons", "Rams").
+_NICKNAME_ABBR: dict[str, str] = {
+    "Raiders": "LV",  "Jets": "NYJ",   "Cardinals": "ARI", "Titans": "TEN",
+    "Giants": "NYG",  "Browns": "CLE", "Commanders": "WSH","Saints": "NO",
+    "Bears": "CHI",   "Patriots": "NE","Jaguars": "JAX",   "Rams": "LAR",
+    "Falcons": "ATL", "Panthers": "CAR","Steelers": "PIT",  "Eagles": "PHI",
+    "Cowboys": "DAL", "Colts": "IND",  "Bengals": "CIN",   "Dolphins": "MIA",
+    "Seahawks": "SEA","Broncos": "DEN","Buccaneers": "TB", "Packers": "GB",
+    "Vikings": "MIN", "Chargers": "LAC","Lions": "DET",    "49ers": "SF",
+    "Ravens": "BAL",  "Bills": "BUF",  "Chiefs": "KC",     "Texans": "HOU",
+}
+
+
+def _nickname_abbr(nickname: str) -> str:
+    """Map a team nickname to an abbreviation. Returns empty string if unknown."""
+    return _NICKNAME_ABBR.get(nickname.strip(), "")
+
+
+def _parse_prosports_trade_rows(html: str, pick_year: int) -> list[dict]:
+    """
+    Shared parse logic for prosportstransactions.com DraftTrades/Years/<year>.htm.
+
+    Table structure (confirmed via inspection):
+      - class="datatable center"
+      - Round label rows: <td class="RoundLabel">Round N</td>
+      - Trade rows: td[0]=round#, td[1]=current holder (img alt), td[2]=trade info
+        td[2] contains: first img alt = previous holder; p.bodyCopySm = trade text
+        The pick appears in <strong> within bodyCopySm, date as "on YYYY-MM-DD"
+
+    Returns list of raw trade dicts with keys:
+      year, round, overall, pick_in_round, date, from, to
+    """
+    import re
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+
+    table = soup.find("table", {"class": "datatable"})
+    if not table:
+        logger.warning("[prosports-%s] no datatable found", pick_year)
+        return results
+
+    current_round = 0
+    for row in table.find_all("tr"):
+        # Round label rows
+        label_td = row.find("td", class_="RoundLabel")
+        if label_td:
+            m = re.search(r"Round\s+(\d+)", label_td.get_text())
+            if m:
+                current_round = int(m.group(1))
+            continue
+
+        tds = row.find_all("td")
+        if len(tds) < 3 or current_round == 0:
+            continue
+
+        # td[2] must have a p.bodyCopySm with a Traded entry about pick_year
+        txn_td = tds[2]
+        body = txn_td.find("p", class_="bodyCopySm")
+        if not body:
+            continue
+        body_text = body.get_text(strip=True)
+        if "Traded" not in body_text:
+            continue
+        if str(pick_year) not in body_text:
+            continue
+        # Skip conditional/unconfirmed entries
+        if "conditional" in body_text.lower():
+            continue
+
+        # Current holder: td[1] first img alt
+        to_img = tds[1].find("img")
+        if not to_img:
+            continue
+        to_abbr = _nickname_abbr(to_img.get("alt", ""))
+        if not to_abbr:
+            continue
+
+        # Previous holder: td[2] first img alt
+        from_img = txn_td.find("img")
+        if not from_img:
+            continue
+        from_abbr = _nickname_abbr(from_img.get("alt", ""))
+        if not from_abbr or from_abbr == to_abbr:
+            continue
+
+        # Date: "on YYYY-MM-DD"
+        date_m = re.search(r"on\s+(\d{4}-\d{2}-\d{2})", body_text)
+        if not date_m:
+            continue
+        date_str = date_m.group(1)
+
+        # Overall pick number: "#N-" in the strong tag, or 0 if not yet assigned
+        strong = body.find("strong")
+        overall = 0
+        if strong:
+            ovr_m = re.search(r"#(\d+)-", strong.get_text())
+            if ovr_m:
+                overall = int(ovr_m.group(1))
+
+        results.append({
+            "year":          pick_year,
+            "round":         current_round,
+            "overall":       overall,
+            "pick_in_round": _pick_in_round(overall) if overall else 0,
+            "date":          date_str,
+            "from":          from_abbr,
+            "to":            to_abbr,
+        })
+
+    logger.info("[prosports-%s] parsed %d trade entries", pick_year, len(results))
+    return results
+
+
+def _parse_prosports_current(html: str) -> list[dict]:
+    """Parse prosportstransactions.com DraftTrades/Years/2026.htm.
+
+    Returns list of dicts:
+      {"overall": int, "round": int, "pick_in_round": int,
+       "date": "YYYY-MM-DD", "from": "ABR", "to": "ABR"}
+    """
+    raw = _parse_prosports_trade_rows(html, 2026)
+    return [
+        {
+            "overall":       e["overall"],
+            "round":         e["round"],
+            "pick_in_round": e["pick_in_round"],
+            "date":          e["date"],
+            "from":          e["from"],
+            "to":            e["to"],
+        }
+        for e in raw
+    ]
+
+
+# ── History source registries ─────────────────────────────────────────────────
+
+CURRENT_HISTORY_SOURCES = [
+    Source(
+        "prosportstransactions-current",
+        "https://prosportstransactions.com/football/DraftTrades/Years/2026.htm",
+        "history_current",
+        _parse_prosports_current,
+        priority=0,
+        use_playwright=True,
+    ),
 ]
